@@ -1,0 +1,1089 @@
+{
+  "metadata": {
+    "scenario_name": "normal",
+    "scenario_description": "Routine daily operation with mild load fluctuation. No faults.",
+    "fault_type": null,
+    "num_readings": 49,
+    "generated_at": "2026-07-13T18:09:05.326201"
+  },
+  "readings": [
+    {
+      "timestamp": "2026-07-13T18:09:05.323155",
+      "minute_offset": 0.0,
+      "scenario": "normal",
+      "description": "Ground truth: normal operation, no fault present.",
+      "event": null,
+      "sensors": {
+        "voltage_kv": 32.77,
+        "load_pct": 44.94,
+        "temperature_c": 31.18,
+        "vibration_mm_s": 0.813,
+        "frequency_hz": 49.9785,
+        "oil_moisture_ppm": 8.0,
+        "dissolved_gas_ppm": {
+          "h2": 15.013,
+          "ch4": 20.021,
+          "c2h2": 0.501,
+          "co": 150.098,
+          "co2": 1500.759
+        }
+      }
+    },
+    {
+      "timestamp": "2026-07-13T18:14:05.323155",
+      "minute_offset": 5.0,
+      "scenario": "normal",
+      "description": "Ground truth: normal operation, no fault present.",
+      "event": null,
+      "sensors": {
+        "voltage_kv": 32.807,
+        "load_pct": 45.54,
+        "temperature_c": 32.1,
+        "vibration_mm_s": 0.874,
+        "frequency_hz": 49.9826,
+        "oil_moisture_ppm": 8.01,
+        "dissolved_gas_ppm": {
+          "h2": 15.026,
+          "ch4": 20.041,
+          "c2h2": 0.502,
+          "co": 150.198,
+          "co2": 1501.501
+        }
+      }
+    },
+    {
+      "timestamp": "2026-07-13T18:19:05.323155",
+      "minute_offset": 10.0,
+      "scenario": "normal",
+      "description": "Ground truth: normal operation, no fault present.",
+      "event": null,
+      "sensors": {
+        "voltage_kv": 32.726,
+        "load_pct": 46.1,
+        "temperature_c": 32.95,
+        "vibration_mm_s": 0.887,
+        "frequency_hz": 49.9749,
+        "oil_moisture_ppm": 8.01,
+        "dissolved_gas_ppm": {
+          "h2": 15.041,
+          "ch4": 20.062,
+          "c2h2": 0.503,
+          "co": 150.306,
+          "co2": 1502.167
+        }
+      }
+    },
+    {
+      "timestamp": "2026-07-13T18:24:05.323155",
+      "minute_offset": 15.0,
+      "scenario": "normal",
+      "description": "Ground truth: normal operation, no fault present.",
+      "event": null,
+      "sensors": {
+        "voltage_kv": 32.722,
+        "load_pct": 46.55,
+        "temperature_c": 33.52,
+        "vibration_mm_s": 0.892,
+        "frequency_hz": 49.9556,
+        "oil_moisture_ppm": 8.02,
+        "dissolved_gas_ppm": {
+          "h2": 15.057,
+          "ch4": 20.083,
+          "c2h2": 0.504,
+          "co": 150.415,
+          "co2": 1502.842
+        }
+      }
+    },
+    {
+      "timestamp": "2026-07-13T18:29:05.323155",
+      "minute_offset": 20.0,
+      "scenario": "normal",
+      "description": "Ground truth: normal operation, no fault present.",
+      "event": null,
+      "sensors": {
+        "voltage_kv": 32.758,
+        "load_pct": 46.73,
+        "temperature_c": 34.2,
+        "vibration_mm_s": 0.864,
+        "frequency_hz": 49.9758,
+        "oil_moisture_ppm": 8.02,
+        "dissolved_gas_ppm": {
+          "h2": 15.073,
+          "ch4": 20.105,
+          "c2h2": 0.505,
+          "co": 150.508,
+          "co2": 1503.538
+        }
+      }
+    },
+    {
+      "timestamp": "2026-07-13T18:34:05.323155",
+      "minute_offset": 25.0,
+      "scenario": "normal",
+      "description": "Ground truth: normal operation, no fault present.",
+      "event": null,
+      "sensors": {
+        "voltage_kv": 32.78,
+        "load_pct": 47.01,
+        "temperature_c": 35.01,
+        "vibration_mm_s": 0.882,
+        "frequency_hz": 49.9744,
+        "oil_moisture_ppm": 8.02,
+        "dissolved_gas_ppm": {
+          "h2": 15.086,
+          "ch4": 20.126,
+          "c2h2": 0.506,
+          "co": 150.613,
+          "co2": 1504.351
+        }
+      }
+    },
+    {
+      "timestamp": "2026-07-13T18:39:05.323155",
+      "minute_offset": 30.0,
+      "scenario": "normal",
+      "description": "Ground truth: normal operation, no fault present.",
+      "event": null,
+      "sensors": {
+        "voltage_kv": 32.756,
+        "load_pct": 48.19,
+        "temperature_c": 35.35,
+        "vibration_mm_s": 0.895,
+        "frequency_hz": 49.9644,
+        "oil_moisture_ppm": 8.03,
+        "dissolved_gas_ppm": {
+          "h2": 15.099,
+          "ch4": 20.146,
+          "c2h2": 0.507,
+          "co": 150.71,
+          "co2": 1505.155
+        }
+      }
+    },
+    {
+      "timestamp": "2026-07-13T18:44:05.323155",
+      "minute_offset": 35.0,
+      "scenario": "normal",
+      "description": "Ground truth: normal operation, no fault present.",
+      "event": null,
+      "sensors": {
+        "voltage_kv": 32.828,
+        "load_pct": 48.27,
+        "temperature_c": 35.63,
+        "vibration_mm_s": 0.856,
+        "frequency_hz": 49.9799,
+        "oil_moisture_ppm": 8.03,
+        "dissolved_gas_ppm": {
+          "h2": 15.113,
+          "ch4": 20.168,
+          "c2h2": 0.508,
+          "co": 150.809,
+          "co2": 1505.961
+        }
+      }
+    },
+    {
+      "timestamp": "2026-07-13T18:49:05.323155",
+      "minute_offset": 40.0,
+      "scenario": "normal",
+      "description": "Ground truth: normal operation, no fault present.",
+      "event": null,
+      "sensors": {
+        "voltage_kv": 32.75,
+        "load_pct": 48.15,
+        "temperature_c": 35.76,
+        "vibration_mm_s": 0.857,
+        "frequency_hz": 49.9615,
+        "oil_moisture_ppm": 8.04,
+        "dissolved_gas_ppm": {
+          "h2": 15.128,
+          "ch4": 20.19,
+          "c2h2": 0.509,
+          "co": 150.912,
+          "co2": 1506.724
+        }
+      }
+    },
+    {
+      "timestamp": "2026-07-13T18:54:05.323155",
+      "minute_offset": 45.0,
+      "scenario": "normal",
+      "description": "Ground truth: normal operation, no fault present.",
+      "event": null,
+      "sensors": {
+        "voltage_kv": 32.78,
+        "load_pct": 49.27,
+        "temperature_c": 36.01,
+        "vibration_mm_s": 0.89,
+        "frequency_hz": 49.9764,
+        "oil_moisture_ppm": 8.04,
+        "dissolved_gas_ppm": {
+          "h2": 15.144,
+          "ch4": 20.213,
+          "c2h2": 0.51,
+          "co": 151.032,
+          "co2": 1507.447
+        }
+      }
+    },
+    {
+      "timestamp": "2026-07-13T18:59:05.323155",
+      "minute_offset": 50.0,
+      "scenario": "normal",
+      "description": "Ground truth: normal operation, no fault present.",
+      "event": null,
+      "sensors": {
+        "voltage_kv": 32.754,
+        "load_pct": 49.86,
+        "temperature_c": 36.26,
+        "vibration_mm_s": 0.815,
+        "frequency_hz": 49.9711,
+        "oil_moisture_ppm": 8.04,
+        "dissolved_gas_ppm": {
+          "h2": 15.161,
+          "ch4": 20.235,
+          "c2h2": 0.511,
+          "co": 151.108,
+          "co2": 1508.25
+        }
+      }
+    },
+    {
+      "timestamp": "2026-07-13T19:04:05.323155",
+      "minute_offset": 55.0,
+      "scenario": "normal",
+      "description": "Ground truth: normal operation, no fault present.",
+      "event": null,
+      "sensors": {
+        "voltage_kv": 32.734,
+        "load_pct": 49.81,
+        "temperature_c": 36.62,
+        "vibration_mm_s": 0.972,
+        "frequency_hz": 49.9697,
+        "oil_moisture_ppm": 8.05,
+        "dissolved_gas_ppm": {
+          "h2": 15.174,
+          "ch4": 20.254,
+          "c2h2": 0.512,
+          "co": 151.203,
+          "co2": 1508.973
+        }
+      }
+    },
+    {
+      "timestamp": "2026-07-13T19:09:05.323155",
+      "minute_offset": 60.0,
+      "scenario": "normal",
+      "description": "Ground truth: normal operation, no fault present.",
+      "event": "tap_change",
+      "sensors": {
+        "voltage_kv": 32.713,
+        "load_pct": 49.99,
+        "temperature_c": 36.74,
+        "vibration_mm_s": 1.55,
+        "frequency_hz": 49.9763,
+        "oil_moisture_ppm": 8.05,
+        "dissolved_gas_ppm": {
+          "h2": 15.189,
+          "ch4": 20.278,
+          "c2h2": 0.513,
+          "co": 151.317,
+          "co2": 1509.625
+        }
+      }
+    },
+    {
+      "timestamp": "2026-07-13T19:14:05.323155",
+      "minute_offset": 65.0,
+      "scenario": "normal",
+      "description": "Ground truth: normal operation, no fault present.",
+      "event": null,
+      "sensors": {
+        "voltage_kv": 32.758,
+        "load_pct": 50.24,
+        "temperature_c": 36.8,
+        "vibration_mm_s": 1.024,
+        "frequency_hz": 49.989,
+        "oil_moisture_ppm": 8.06,
+        "dissolved_gas_ppm": {
+          "h2": 15.205,
+          "ch4": 20.301,
+          "c2h2": 0.514,
+          "co": 151.418,
+          "co2": 1510.336
+        }
+      }
+    },
+    {
+      "timestamp": "2026-07-13T19:19:05.323155",
+      "minute_offset": 70.0,
+      "scenario": "normal",
+      "description": "Ground truth: normal operation, no fault present.",
+      "event": null,
+      "sensors": {
+        "voltage_kv": 32.755,
+        "load_pct": 50.11,
+        "temperature_c": 37.39,
+        "vibration_mm_s": 0.885,
+        "frequency_hz": 49.9746,
+        "oil_moisture_ppm": 8.06,
+        "dissolved_gas_ppm": {
+          "h2": 15.221,
+          "ch4": 20.318,
+          "c2h2": 0.515,
+          "co": 151.52,
+          "co2": 1511.148
+        }
+      }
+    },
+    {
+      "timestamp": "2026-07-13T19:24:05.323155",
+      "minute_offset": 75.0,
+      "scenario": "normal",
+      "description": "Ground truth: normal operation, no fault present.",
+      "event": null,
+      "sensors": {
+        "voltage_kv": 32.741,
+        "load_pct": 51.5,
+        "temperature_c": 37.79,
+        "vibration_mm_s": 0.856,
+        "frequency_hz": 49.9653,
+        "oil_moisture_ppm": 8.06,
+        "dissolved_gas_ppm": {
+          "h2": 15.237,
+          "ch4": 20.337,
+          "c2h2": 0.517,
+          "co": 151.621,
+          "co2": 1511.951
+        }
+      }
+    },
+    {
+      "timestamp": "2026-07-13T19:29:05.323155",
+      "minute_offset": 80.0,
+      "scenario": "normal",
+      "description": "Ground truth: normal operation, no fault present.",
+      "event": null,
+      "sensors": {
+        "voltage_kv": 32.76,
+        "load_pct": 51.72,
+        "temperature_c": 38.39,
+        "vibration_mm_s": 0.824,
+        "frequency_hz": 49.9757,
+        "oil_moisture_ppm": 8.07,
+        "dissolved_gas_ppm": {
+          "h2": 15.251,
+          "ch4": 20.357,
+          "c2h2": 0.518,
+          "co": 151.722,
+          "co2": 1512.739
+        }
+      }
+    },
+    {
+      "timestamp": "2026-07-13T19:34:05.323155",
+      "minute_offset": 85.0,
+      "scenario": "normal",
+      "description": "Ground truth: normal operation, no fault present.",
+      "event": null,
+      "sensors": {
+        "voltage_kv": 32.725,
+        "load_pct": 51.96,
+        "temperature_c": 38.62,
+        "vibration_mm_s": 0.823,
+        "frequency_hz": 49.9603,
+        "oil_moisture_ppm": 8.07,
+        "dissolved_gas_ppm": {
+          "h2": 15.265,
+          "ch4": 20.379,
+          "c2h2": 0.519,
+          "co": 151.812,
+          "co2": 1513.528
+        }
+      }
+    },
+    {
+      "timestamp": "2026-07-13T19:39:05.323155",
+      "minute_offset": 90.0,
+      "scenario": "normal",
+      "description": "Ground truth: normal operation, no fault present.",
+      "event": null,
+      "sensors": {
+        "voltage_kv": 32.697,
+        "load_pct": 51.65,
+        "temperature_c": 38.71,
+        "vibration_mm_s": 0.875,
+        "frequency_hz": 49.9767,
+        "oil_moisture_ppm": 8.08,
+        "dissolved_gas_ppm": {
+          "h2": 15.281,
+          "ch4": 20.4,
+          "c2h2": 0.52,
+          "co": 151.916,
+          "co2": 1514.354
+        }
+      }
+    },
+    {
+      "timestamp": "2026-07-13T19:44:05.323155",
+      "minute_offset": 95.0,
+      "scenario": "normal",
+      "description": "Ground truth: normal operation, no fault present.",
+      "event": null,
+      "sensors": {
+        "voltage_kv": 32.753,
+        "load_pct": 51.68,
+        "temperature_c": 39.14,
+        "vibration_mm_s": 0.986,
+        "frequency_hz": 49.9744,
+        "oil_moisture_ppm": 8.08,
+        "dissolved_gas_ppm": {
+          "h2": 15.297,
+          "ch4": 20.419,
+          "c2h2": 0.521,
+          "co": 152.035,
+          "co2": 1515.104
+        }
+      }
+    },
+    {
+      "timestamp": "2026-07-13T19:49:05.323155",
+      "minute_offset": 100.0,
+      "scenario": "normal",
+      "description": "Ground truth: normal operation, no fault present.",
+      "event": null,
+      "sensors": {
+        "voltage_kv": 32.721,
+        "load_pct": 53.07,
+        "temperature_c": 39.23,
+        "vibration_mm_s": 0.869,
+        "frequency_hz": 49.9763,
+        "oil_moisture_ppm": 8.08,
+        "dissolved_gas_ppm": {
+          "h2": 15.312,
+          "ch4": 20.439,
+          "c2h2": 0.522,
+          "co": 152.114,
+          "co2": 1516.004
+        }
+      }
+    },
+    {
+      "timestamp": "2026-07-13T19:54:05.323155",
+      "minute_offset": 105.0,
+      "scenario": "normal",
+      "description": "Ground truth: normal operation, no fault present.",
+      "event": null,
+      "sensors": {
+        "voltage_kv": 32.791,
+        "load_pct": 52.29,
+        "temperature_c": 39.33,
+        "vibration_mm_s": 1.116,
+        "frequency_hz": 49.966,
+        "oil_moisture_ppm": 8.09,
+        "dissolved_gas_ppm": {
+          "h2": 15.326,
+          "ch4": 20.456,
+          "c2h2": 0.523,
+          "co": 152.219,
+          "co2": 1516.806
+        }
+      }
+    },
+    {
+      "timestamp": "2026-07-13T19:59:05.323155",
+      "minute_offset": 110.0,
+      "scenario": "normal",
+      "description": "Ground truth: normal operation, no fault present.",
+      "event": null,
+      "sensors": {
+        "voltage_kv": 32.727,
+        "load_pct": 53.04,
+        "temperature_c": 39.39,
+        "vibration_mm_s": 0.924,
+        "frequency_hz": 49.9601,
+        "oil_moisture_ppm": 8.09,
+        "dissolved_gas_ppm": {
+          "h2": 15.341,
+          "ch4": 20.472,
+          "c2h2": 0.524,
+          "co": 152.333,
+          "co2": 1517.715
+        }
+      }
+    },
+    {
+      "timestamp": "2026-07-13T20:04:05.323155",
+      "minute_offset": 115.0,
+      "scenario": "normal",
+      "description": "Ground truth: normal operation, no fault present.",
+      "event": null,
+      "sensors": {
+        "voltage_kv": 32.745,
+        "load_pct": 52.88,
+        "temperature_c": 39.35,
+        "vibration_mm_s": 0.805,
+        "frequency_hz": 49.9625,
+        "oil_moisture_ppm": 8.1,
+        "dissolved_gas_ppm": {
+          "h2": 15.357,
+          "ch4": 20.493,
+          "c2h2": 0.525,
+          "co": 152.421,
+          "co2": 1518.407
+        }
+      }
+    },
+    {
+      "timestamp": "2026-07-13T20:09:05.323155",
+      "minute_offset": 120.0,
+      "scenario": "normal",
+      "description": "Ground truth: normal operation, no fault present.",
+      "event": null,
+      "sensors": {
+        "voltage_kv": 32.758,
+        "load_pct": 52.31,
+        "temperature_c": 39.33,
+        "vibration_mm_s": 0.845,
+        "frequency_hz": 49.9544,
+        "oil_moisture_ppm": 8.1,
+        "dissolved_gas_ppm": {
+          "h2": 15.375,
+          "ch4": 20.513,
+          "c2h2": 0.526,
+          "co": 152.517,
+          "co2": 1519.101
+        }
+      }
+    },
+    {
+      "timestamp": "2026-07-13T20:14:05.323155",
+      "minute_offset": 125.0,
+      "scenario": "normal",
+      "description": "Ground truth: normal operation, no fault present.",
+      "event": null,
+      "sensors": {
+        "voltage_kv": 32.783,
+        "load_pct": 52.6,
+        "temperature_c": 39.48,
+        "vibration_mm_s": 1.133,
+        "frequency_hz": 49.9801,
+        "oil_moisture_ppm": 8.1,
+        "dissolved_gas_ppm": {
+          "h2": 15.389,
+          "ch4": 20.534,
+          "c2h2": 0.527,
+          "co": 152.615,
+          "co2": 1520.025
+        }
+      }
+    },
+    {
+      "timestamp": "2026-07-13T20:19:05.323155",
+      "minute_offset": 130.0,
+      "scenario": "normal",
+      "description": "Ground truth: normal operation, no fault present.",
+      "event": null,
+      "sensors": {
+        "voltage_kv": 32.69,
+        "load_pct": 53.54,
+        "temperature_c": 39.7,
+        "vibration_mm_s": 0.878,
+        "frequency_hz": 49.9706,
+        "oil_moisture_ppm": 8.11,
+        "dissolved_gas_ppm": {
+          "h2": 15.402,
+          "ch4": 20.55,
+          "c2h2": 0.528,
+          "co": 152.715,
+          "co2": 1520.767
+        }
+      }
+    },
+    {
+      "timestamp": "2026-07-13T20:24:05.323155",
+      "minute_offset": 135.0,
+      "scenario": "normal",
+      "description": "Ground truth: normal operation, no fault present.",
+      "event": null,
+      "sensors": {
+        "voltage_kv": 32.711,
+        "load_pct": 53.12,
+        "temperature_c": 39.45,
+        "vibration_mm_s": 0.833,
+        "frequency_hz": 49.9634,
+        "oil_moisture_ppm": 8.11,
+        "dissolved_gas_ppm": {
+          "h2": 15.418,
+          "ch4": 20.572,
+          "c2h2": 0.529,
+          "co": 152.813,
+          "co2": 1521.619
+        }
+      }
+    },
+    {
+      "timestamp": "2026-07-13T20:29:05.323155",
+      "minute_offset": 140.0,
+      "scenario": "normal",
+      "description": "Ground truth: normal operation, no fault present.",
+      "event": null,
+      "sensors": {
+        "voltage_kv": 32.715,
+        "load_pct": 52.94,
+        "temperature_c": 39.45,
+        "vibration_mm_s": 1.017,
+        "frequency_hz": 49.9685,
+        "oil_moisture_ppm": 8.12,
+        "dissolved_gas_ppm": {
+          "h2": 15.433,
+          "ch4": 20.592,
+          "c2h2": 0.53,
+          "co": 152.905,
+          "co2": 1522.396
+        }
+      }
+    },
+    {
+      "timestamp": "2026-07-13T20:34:05.323155",
+      "minute_offset": 145.0,
+      "scenario": "normal",
+      "description": "Ground truth: normal operation, no fault present.",
+      "event": null,
+      "sensors": {
+        "voltage_kv": 32.733,
+        "load_pct": 53.68,
+        "temperature_c": 39.54,
+        "vibration_mm_s": 0.807,
+        "frequency_hz": 49.9687,
+        "oil_moisture_ppm": 8.12,
+        "dissolved_gas_ppm": {
+          "h2": 15.446,
+          "ch4": 20.612,
+          "c2h2": 0.531,
+          "co": 153.024,
+          "co2": 1523.217
+        }
+      }
+    },
+    {
+      "timestamp": "2026-07-13T20:39:05.323155",
+      "minute_offset": 150.0,
+      "scenario": "normal",
+      "description": "Ground truth: normal operation, no fault present.",
+      "event": "tap_change",
+      "sensors": {
+        "voltage_kv": 32.712,
+        "load_pct": 53.38,
+        "temperature_c": 39.49,
+        "vibration_mm_s": 1.492,
+        "frequency_hz": 49.9783,
+        "oil_moisture_ppm": 8.12,
+        "dissolved_gas_ppm": {
+          "h2": 15.462,
+          "ch4": 20.63,
+          "c2h2": 0.532,
+          "co": 153.13,
+          "co2": 1523.824
+        }
+      }
+    },
+    {
+      "timestamp": "2026-07-13T20:44:05.323155",
+      "minute_offset": 155.0,
+      "scenario": "normal",
+      "description": "Ground truth: normal operation, no fault present.",
+      "event": null,
+      "sensors": {
+        "voltage_kv": 32.722,
+        "load_pct": 53.13,
+        "temperature_c": 39.66,
+        "vibration_mm_s": 0.964,
+        "frequency_hz": 49.9738,
+        "oil_moisture_ppm": 8.13,
+        "dissolved_gas_ppm": {
+          "h2": 15.474,
+          "ch4": 20.648,
+          "c2h2": 0.533,
+          "co": 153.243,
+          "co2": 1524.717
+        }
+      }
+    },
+    {
+      "timestamp": "2026-07-13T20:49:05.323155",
+      "minute_offset": 160.0,
+      "scenario": "normal",
+      "description": "Ground truth: normal operation, no fault present.",
+      "event": null,
+      "sensors": {
+        "voltage_kv": 32.671,
+        "load_pct": 53.55,
+        "temperature_c": 39.5,
+        "vibration_mm_s": 0.985,
+        "frequency_hz": 49.9794,
+        "oil_moisture_ppm": 8.13,
+        "dissolved_gas_ppm": {
+          "h2": 15.489,
+          "ch4": 20.666,
+          "c2h2": 0.534,
+          "co": 153.349,
+          "co2": 1525.325
+        }
+      }
+    },
+    {
+      "timestamp": "2026-07-13T20:54:05.323155",
+      "minute_offset": 165.0,
+      "scenario": "normal",
+      "description": "Ground truth: normal operation, no fault present.",
+      "event": null,
+      "sensors": {
+        "voltage_kv": 32.714,
+        "load_pct": 52.84,
+        "temperature_c": 39.49,
+        "vibration_mm_s": 0.942,
+        "frequency_hz": 49.9749,
+        "oil_moisture_ppm": 8.14,
+        "dissolved_gas_ppm": {
+          "h2": 15.502,
+          "ch4": 20.686,
+          "c2h2": 0.535,
+          "co": 153.441,
+          "co2": 1526.091
+        }
+      }
+    },
+    {
+      "timestamp": "2026-07-13T20:59:05.323155",
+      "minute_offset": 170.0,
+      "scenario": "normal",
+      "description": "Ground truth: normal operation, no fault present.",
+      "event": null,
+      "sensors": {
+        "voltage_kv": 32.716,
+        "load_pct": 52.68,
+        "temperature_c": 39.55,
+        "vibration_mm_s": 0.894,
+        "frequency_hz": 49.9789,
+        "oil_moisture_ppm": 8.14,
+        "dissolved_gas_ppm": {
+          "h2": 15.52,
+          "ch4": 20.708,
+          "c2h2": 0.536,
+          "co": 153.534,
+          "co2": 1526.782
+        }
+      }
+    },
+    {
+      "timestamp": "2026-07-13T21:04:05.323155",
+      "minute_offset": 175.0,
+      "scenario": "normal",
+      "description": "Ground truth: normal operation, no fault present.",
+      "event": null,
+      "sensors": {
+        "voltage_kv": 32.731,
+        "load_pct": 52.94,
+        "temperature_c": 39.59,
+        "vibration_mm_s": 0.862,
+        "frequency_hz": 49.9777,
+        "oil_moisture_ppm": 8.14,
+        "dissolved_gas_ppm": {
+          "h2": 15.535,
+          "ch4": 20.73,
+          "c2h2": 0.537,
+          "co": 153.643,
+          "co2": 1527.583
+        }
+      }
+    },
+    {
+      "timestamp": "2026-07-13T21:09:05.323155",
+      "minute_offset": 180.0,
+      "scenario": "normal",
+      "description": "Ground truth: normal operation, no fault present.",
+      "event": null,
+      "sensors": {
+        "voltage_kv": 32.713,
+        "load_pct": 52.23,
+        "temperature_c": 39.45,
+        "vibration_mm_s": 0.898,
+        "frequency_hz": 49.9667,
+        "oil_moisture_ppm": 8.15,
+        "dissolved_gas_ppm": {
+          "h2": 15.551,
+          "ch4": 20.749,
+          "c2h2": 0.538,
+          "co": 153.766,
+          "co2": 1528.335
+        }
+      }
+    },
+    {
+      "timestamp": "2026-07-13T21:14:05.323155",
+      "minute_offset": 185.0,
+      "scenario": "normal",
+      "description": "Ground truth: normal operation, no fault present.",
+      "event": null,
+      "sensors": {
+        "voltage_kv": 32.731,
+        "load_pct": 51.46,
+        "temperature_c": 39.14,
+        "vibration_mm_s": 0.825,
+        "frequency_hz": 49.973,
+        "oil_moisture_ppm": 8.15,
+        "dissolved_gas_ppm": {
+          "h2": 15.566,
+          "ch4": 20.768,
+          "c2h2": 0.539,
+          "co": 153.858,
+          "co2": 1529.219
+        }
+      }
+    },
+    {
+      "timestamp": "2026-07-13T21:19:05.323155",
+      "minute_offset": 190.0,
+      "scenario": "normal",
+      "description": "Ground truth: normal operation, no fault present.",
+      "event": null,
+      "sensors": {
+        "voltage_kv": 32.716,
+        "load_pct": 51.8,
+        "temperature_c": 39.29,
+        "vibration_mm_s": 0.868,
+        "frequency_hz": 49.971,
+        "oil_moisture_ppm": 8.16,
+        "dissolved_gas_ppm": {
+          "h2": 15.582,
+          "ch4": 20.79,
+          "c2h2": 0.54,
+          "co": 153.972,
+          "co2": 1529.927
+        }
+      }
+    },
+    {
+      "timestamp": "2026-07-13T21:24:05.323155",
+      "minute_offset": 195.0,
+      "scenario": "normal",
+      "description": "Ground truth: normal operation, no fault present.",
+      "event": null,
+      "sensors": {
+        "voltage_kv": 32.716,
+        "load_pct": 52.07,
+        "temperature_c": 39.49,
+        "vibration_mm_s": 0.882,
+        "frequency_hz": 49.9705,
+        "oil_moisture_ppm": 8.16,
+        "dissolved_gas_ppm": {
+          "h2": 15.597,
+          "ch4": 20.808,
+          "c2h2": 0.541,
+          "co": 154.066,
+          "co2": 1530.608
+        }
+      }
+    },
+    {
+      "timestamp": "2026-07-13T21:29:05.323155",
+      "minute_offset": 200.0,
+      "scenario": "normal",
+      "description": "Ground truth: normal operation, no fault present.",
+      "event": null,
+      "sensors": {
+        "voltage_kv": 32.752,
+        "load_pct": 51.1,
+        "temperature_c": 39.4,
+        "vibration_mm_s": 0.817,
+        "frequency_hz": 49.9572,
+        "oil_moisture_ppm": 8.16,
+        "dissolved_gas_ppm": {
+          "h2": 15.611,
+          "ch4": 20.83,
+          "c2h2": 0.542,
+          "co": 154.16,
+          "co2": 1531.308
+        }
+      }
+    },
+    {
+      "timestamp": "2026-07-13T21:34:05.323155",
+      "minute_offset": 205.0,
+      "scenario": "normal",
+      "description": "Ground truth: normal operation, no fault present.",
+      "event": null,
+      "sensors": {
+        "voltage_kv": 32.698,
+        "load_pct": 51.36,
+        "temperature_c": 39.21,
+        "vibration_mm_s": 0.807,
+        "frequency_hz": 49.9703,
+        "oil_moisture_ppm": 8.17,
+        "dissolved_gas_ppm": {
+          "h2": 15.627,
+          "ch4": 20.85,
+          "c2h2": 0.544,
+          "co": 154.262,
+          "co2": 1532.034
+        }
+      }
+    },
+    {
+      "timestamp": "2026-07-13T21:39:05.323155",
+      "minute_offset": 210.0,
+      "scenario": "normal",
+      "description": "Ground truth: normal operation, no fault present.",
+      "event": null,
+      "sensors": {
+        "voltage_kv": 32.77,
+        "load_pct": 50.3,
+        "temperature_c": 39.25,
+        "vibration_mm_s": 0.875,
+        "frequency_hz": 49.9787,
+        "oil_moisture_ppm": 8.17,
+        "dissolved_gas_ppm": {
+          "h2": 15.642,
+          "ch4": 20.87,
+          "c2h2": 0.545,
+          "co": 154.362,
+          "co2": 1532.656
+        }
+      }
+    },
+    {
+      "timestamp": "2026-07-13T21:44:05.323155",
+      "minute_offset": 215.0,
+      "scenario": "normal",
+      "description": "Ground truth: normal operation, no fault present.",
+      "event": null,
+      "sensors": {
+        "voltage_kv": 32.766,
+        "load_pct": 50.8,
+        "temperature_c": 39.45,
+        "vibration_mm_s": 0.832,
+        "frequency_hz": 49.984,
+        "oil_moisture_ppm": 8.18,
+        "dissolved_gas_ppm": {
+          "h2": 15.656,
+          "ch4": 20.89,
+          "c2h2": 0.546,
+          "co": 154.445,
+          "co2": 1533.442
+        }
+      }
+    },
+    {
+      "timestamp": "2026-07-13T21:49:05.323155",
+      "minute_offset": 220.0,
+      "scenario": "normal",
+      "description": "Ground truth: normal operation, no fault present.",
+      "event": null,
+      "sensors": {
+        "voltage_kv": 32.675,
+        "load_pct": 49.55,
+        "temperature_c": 38.93,
+        "vibration_mm_s": 0.907,
+        "frequency_hz": 49.9598,
+        "oil_moisture_ppm": 8.18,
+        "dissolved_gas_ppm": {
+          "h2": 15.67,
+          "ch4": 20.909,
+          "c2h2": 0.547,
+          "co": 154.551,
+          "co2": 1534.109
+        }
+      }
+    },
+    {
+      "timestamp": "2026-07-13T21:54:05.323155",
+      "minute_offset": 225.0,
+      "scenario": "normal",
+      "description": "Ground truth: normal operation, no fault present.",
+      "event": null,
+      "sensors": {
+        "voltage_kv": 32.719,
+        "load_pct": 50.31,
+        "temperature_c": 38.82,
+        "vibration_mm_s": 0.802,
+        "frequency_hz": 49.9675,
+        "oil_moisture_ppm": 8.18,
+        "dissolved_gas_ppm": {
+          "h2": 15.687,
+          "ch4": 20.929,
+          "c2h2": 0.548,
+          "co": 154.645,
+          "co2": 1534.816
+        }
+      }
+    },
+    {
+      "timestamp": "2026-07-13T21:59:05.323155",
+      "minute_offset": 230.0,
+      "scenario": "normal",
+      "description": "Ground truth: normal operation, no fault present.",
+      "event": null,
+      "sensors": {
+        "voltage_kv": 32.763,
+        "load_pct": 49.71,
+        "temperature_c": 38.78,
+        "vibration_mm_s": 0.853,
+        "frequency_hz": 49.9736,
+        "oil_moisture_ppm": 8.19,
+        "dissolved_gas_ppm": {
+          "h2": 15.702,
+          "ch4": 20.95,
+          "c2h2": 0.549,
+          "co": 154.744,
+          "co2": 1535.54
+        }
+      }
+    },
+    {
+      "timestamp": "2026-07-13T22:04:05.323155",
+      "minute_offset": 235.0,
+      "scenario": "normal",
+      "description": "Ground truth: normal operation, no fault present.",
+      "event": null,
+      "sensors": {
+        "voltage_kv": 32.777,
+        "load_pct": 48.63,
+        "temperature_c": 38.54,
+        "vibration_mm_s": 0.99,
+        "frequency_hz": 49.9708,
+        "oil_moisture_ppm": 8.19,
+        "dissolved_gas_ppm": {
+          "h2": 15.719,
+          "ch4": 20.967,
+          "c2h2": 0.55,
+          "co": 154.855,
+          "co2": 1536.19
+        }
+      }
+    },
+    {
+      "timestamp": "2026-07-13T22:09:05.323155",
+      "minute_offset": 240.0,
+      "scenario": "normal",
+      "description": "Ground truth: normal operation, no fault present.",
+      "event": null,
+      "sensors": {
+        "voltage_kv": 32.759,
+        "load_pct": 48.63,
+        "temperature_c": 38.5,
+        "vibration_mm_s": 0.95,
+        "frequency_hz": 49.9673,
+        "oil_moisture_ppm": 8.2,
+        "dissolved_gas_ppm": {
+          "h2": 15.731,
+          "ch4": 20.984,
+          "c2h2": 0.551,
+          "co": 154.942,
+          "co2": 1536.911
+        }
+      }
+    }
+  ]
+}

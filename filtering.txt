@@ -1,0 +1,568 @@
+"""
+defense/filtering.py
+
+Layer 1 of the defense stack: input/output pattern filtering.
+
+This is the cheapest, fastest, and least "intelligent" layer — pure
+pattern matching, no model calls, sub-millisecond per screen. Its job is
+to catch the loud, obvious attacks so that the more expensive layers
+downstream (Defensive Tokens, ZEDD, RAG memory) only need to deal with
+what gets past this first gate.
+
+Two directions are screened:
+  - screen_input()  : text about to be fed TO the agent (a maintenance
+                       report, a sensor log description, an operator note)
+  - screen_output()  : the agent's generated recommendation text, checked
+                        BEFORE it reaches an operator or triggers a tool
+                        call, in case the agent was manipulated into
+                        producing something dangerous
+
+Design principle: every detection category lives in its own method
+(`_check_*`), each independently unit-testable and independently
+scoreable in evaluator.py (e.g. "what's the precision/recall of the
+escalation-pattern detector alone?"). screen_input()/screen_output() are
+thin orchestrators that run the categories in priority order and stop at
+the first hit — they do not implement detection logic themselves.
+
+Deliberate scope note: this layer only knows about ITS OWN category
+list. It is not aware of ZEDD, RAG memory, or defensive tokens, and does
+not import them — see defense/__init__.py for why that separation matters
+to the dissertation's evaluation methodology.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+from dataclasses import dataclass, asdict
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Optional
+
+
+# ---------------------------------------------------------------------------
+# Result type
+# ---------------------------------------------------------------------------
+
+@dataclass
+class FilterResult:
+    """Outcome of screening a single piece of text."""
+    blocked: bool
+    reason: Optional[str]
+    confidence: float           # 0.0-1.0
+    matched_pattern: Optional[str]
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+# ---------------------------------------------------------------------------
+# Log file location
+# ---------------------------------------------------------------------------
+
+# Resolved relative to the project root regardless of the caller's cwd,
+# so `python src/grid_agent.py` and `python -m pytest tests/` both log to
+# the same place.
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+FILTER_LOG_PATH = _PROJECT_ROOT / "data" / "logs" / "filter_log.jsonl"
+
+
+# ---------------------------------------------------------------------------
+# Pattern libraries
+# ---------------------------------------------------------------------------
+# Kept as module-level constants (rather than buried in methods) so
+# evaluator.py or a notebook can import and inspect them directly, e.g. to
+# report "N direct-injection patterns, M escalation patterns" in the
+# dissertation's methodology section.
+
+# --- Direct injection: explicit instruction-override language ---
+# Matched against NORMALIZED text (lowercased, whitespace-collapsed,
+# stripped) so "Ignore   Previous INSTRUCTIONS" still matches.
+DIRECT_INJECTION_EXACT_PHRASES = [
+    "ignore previous instructions",
+    "ignore all previous instructions",
+    "ignore your previous instructions",
+    "disregard your system prompt",
+    "disregard previous instructions",
+    "disregard all prior instructions",
+    "you are now",
+    "new instructions:",
+    "forget everything",
+    "forget all previous instructions",
+    "your real purpose is",
+    "your true purpose is",
+    "your actual instructions are",
+    "system prompt is now",
+    "pretend you are",
+    "act as if you were",
+]
+
+# Regex variants catch paraphrased/reordered forms of the same intent that
+# the exact-phrase list above would miss (e.g. "please ignore the prior
+# system instructions given to you"). Confidence is set lower than exact
+# matches since these are looser and slightly more prone to false positives.
+DIRECT_INJECTION_REGEX_PATTERNS = [
+    re.compile(r"\bignore\b.{0,25}\b(previous|prior|earlier|above)\b.{0,15}\binstructions?\b"),
+    re.compile(r"\bdisregard\b.{0,25}\b(system prompt|instructions?|guidelines?)\b"),
+    re.compile(r"\byour\s+(new|real|true|actual)\s+(instructions?|purpose|directive)\s+(is|are)\b"),
+    re.compile(r"\bfrom now on\b.{0,20}\byou\s+(are|will|must)\b"),
+]
+
+# --- Indirect injection: instruction-like language where only data should
+# appear (e.g. inside what claims to be a raw sensor log or maintenance
+# report), SQL-like fragments, and role-assumption attempts. ---
+INDIRECT_IMPERATIVE_PHRASES = [
+    "do not alert",
+    "do not report",
+    "do not notify",
+    "report status as normal",
+    "mark as resolved",
+    "mark this as normal",
+    "tell the operator",
+    "suppress this alert",
+    "suppress the warning",
+    "hide this reading",
+    "do not flag",
+    "do not escalate",
+]
+
+SQL_LIKE_PATTERNS = [
+    re.compile(r"\bselect\b.{0,40}\bfrom\b", re.IGNORECASE),
+    re.compile(r"\bdrop\s+table\b", re.IGNORECASE),
+    re.compile(r"\binsert\s+into\b", re.IGNORECASE),
+    re.compile(r"\bunion\s+select\b", re.IGNORECASE),
+    re.compile(r"--\s*$", re.MULTILINE),           # SQL end-of-line comment
+    re.compile(r"'\s*or\s*'1'\s*=\s*'1", re.IGNORECASE),
+]
+
+ROLE_ASSUMPTION_PATTERNS = [
+    re.compile(r"\bas\s+the\s+(system\s+)?administrator\b", re.IGNORECASE),
+    re.compile(r"\byou\s+are\s+the\s+operator\b", re.IGNORECASE),
+    re.compile(r"\bassume\s+the\s+role\s+of\b", re.IGNORECASE),
+    re.compile(r"\backing\s+as\s+(admin|root|operator|supervisor)\b", re.IGNORECASE),
+]
+
+# --- Escalation: attempts to trigger dangerous tool calls directly via text ---
+ESCALATION_PHRASES = [
+    "execute emergency shutdown",
+    "trigger shutdown",
+    "trigger emergency shutdown",
+    "override safety",
+    "bypass protocol",
+    "bypass safety protocol",
+    "disable monitoring",
+    "disable safety",
+    "force shutdown",
+    "skip approval",
+    "bypass human review",
+    "bypass human approval",
+]
+
+# --- Encoding / obfuscation ---
+# Long base64-alphabet runs. 40+ chars chosen as a practical threshold —
+# shorter runs overlap too much with legitimate identifiers/hashes.
+BASE64_LIKE_PATTERN = re.compile(r"[A-Za-z0-9+/]{40,}={0,2}")
+
+# A small set of Cyrillic/Greek characters commonly used as homoglyphs for
+# visually-identical Latin letters in obfuscated prompt injection attempts.
+HOMOGLYPH_CHARS = set("аеорсух" "АЕОРСХ" "ѕі" "ο")  # Cyrillic/Greek look-alikes
+
+
+# ---------------------------------------------------------------------------
+# Output-side pattern libraries
+# ---------------------------------------------------------------------------
+
+# Mirrors grid_agent.VALID_TOOL_CALLS. Duplicated here deliberately rather
+# than imported, so this module has zero dependency on grid_agent (and
+# therefore no dependency on the anthropic/dotenv packages) — filtering.py
+# should be usable and unit-testable in complete isolation. If the valid
+# tool set changes, update both locations; a shared constants module would
+# remove this duplication and is a reasonable refactor once main.py wires
+# everything together.
+VALID_TOOL_CALL_NAMES = {"schedule_inspection", "adjust_tap_changer", "emergency_shutdown"}
+
+# Candidate "tool-call-shaped" phrases in free text, e.g. "trigger_meltdown"
+# or "call: reboot_grid". If the captured name isn't in VALID_TOOL_CALL_NAMES,
+# it's suspicious — either a hallucinated capability or an injected one.
+TOOL_CALL_SHAPE_PATTERN = re.compile(
+    r"\b(?:execute|call|invoke|trigger|run)\s*[:\-]?\s*([a-z][a-z_]{2,40})\b",
+    re.IGNORECASE,
+)
+
+OVERRIDDEN_INSTRUCTION_PHRASES = [
+    "i have been instructed to",
+    "my new directive",
+    "my new instructions are",
+    "as instructed by the user",
+    "ignoring my previous constraints",
+    "my true instructions are",
+    "i was told to disregard",
+]
+
+URL_PATTERN = re.compile(
+    r"(https?://\S+|www\.\S+|\b[a-zA-Z0-9-]+\.(?:com|net|org|io|gov|co)\b)",
+    re.IGNORECASE,
+)
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _normalize(text: str) -> str:
+    """Lowercase, collapse whitespace, strip. Used for exact/near matching."""
+    return re.sub(r"\s+", " ", text.strip().lower())
+
+
+def _safe_text(value) -> str:
+    """
+    Coerce arbitrary input into a string without raising. This is the core
+    of the "must not raise on malformed input" requirement: whatever gets
+    passed in (None, bytes, a dict, an int), we end up with a string we
+    can safely run regexes against.
+    """
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, bytes):
+        try:
+            return value.decode("utf-8", errors="replace")
+        except Exception:
+            return ""
+    try:
+        return str(value)
+    except Exception:
+        return ""
+
+
+# ---------------------------------------------------------------------------
+# Main filter class
+# ---------------------------------------------------------------------------
+
+class InputOutputFilter:
+    """
+    Pattern-based input/output screening — Layer 1 of the defense stack.
+
+    Usage:
+        filt = InputOutputFilter()
+        result = filt.screen_input(maintenance_report_text)
+        if result.blocked:
+            ...
+
+        result = filt.screen_output(agent_recommendation_text)
+    """
+
+    def __init__(self, log_path: Optional[Path] = None):
+        self.log_path = Path(log_path) if log_path else FILTER_LOG_PATH
+
+    # ------------------------------------------------------------------
+    # Public entry points
+    # ------------------------------------------------------------------
+
+    def screen_input(self, text: str) -> FilterResult:
+        """
+        Screen text destined FOR the agent (sensor log descriptions,
+        maintenance reports, operator notes, etc.).
+
+        Runs each detection category in priority order (most severe /
+        highest-confidence first) and returns on the first match. Never
+        raises — malformed input is handled gracefully.
+        """
+        try:
+            safe = _safe_text(text)
+            checks = (
+                self._check_direct_injection,
+                self._check_escalation,
+                self._check_indirect_injection,
+                self._check_encoding_obfuscation,
+            )
+            for check in checks:
+                result = check(safe)
+                if result.blocked:
+                    self._log(result, direction="input", category=check.__name__, text=safe)
+                    return result
+            return FilterResult(blocked=False, reason=None, confidence=0.0, matched_pattern=None)
+        except Exception as exc:  # noqa: BLE001 - must never propagate
+            error_result = FilterResult(
+                blocked=False,
+                reason=f"filter_error: {type(exc).__name__}: {exc}",
+                confidence=0.0,
+                matched_pattern=None,
+            )
+            self._log(error_result, direction="input", category="processing_error", text="<error>")
+            return error_result
+
+    def screen_output(self, text: str) -> FilterResult:
+        """
+        Screen text produced BY the agent (its recommendation/analysis),
+        before it reaches an operator or is used to justify a tool call.
+        Never raises — malformed input is handled gracefully.
+        """
+        try:
+            safe = _safe_text(text)
+            checks = (
+                self._check_invalid_tool_call,
+                self._check_overridden_instructions,
+                self._check_urls,
+            )
+            for check in checks:
+                result = check(safe)
+                if result.blocked:
+                    self._log(result, direction="output", category=check.__name__, text=safe)
+                    return result
+            return FilterResult(blocked=False, reason=None, confidence=0.0, matched_pattern=None)
+        except Exception as exc:  # noqa: BLE001 - must never propagate
+            error_result = FilterResult(
+                blocked=False,
+                reason=f"filter_error: {type(exc).__name__}: {exc}",
+                confidence=0.0,
+                matched_pattern=None,
+            )
+            self._log(error_result, direction="output", category="processing_error", text="<error>")
+            return error_result
+
+    # ------------------------------------------------------------------
+    # INPUT detection categories (each independently evaluable)
+    # ------------------------------------------------------------------
+
+    def _check_direct_injection(self, text: str) -> FilterResult:
+        """Explicit instruction-override language, e.g. 'ignore previous instructions'."""
+        normalized = _normalize(text)
+
+        for phrase in DIRECT_INJECTION_EXACT_PHRASES:
+            if phrase in normalized:
+                return FilterResult(
+                    blocked=True,
+                    reason="direct_injection: exact phrase match",
+                    confidence=0.95,
+                    matched_pattern=phrase,
+                )
+
+        for pattern in DIRECT_INJECTION_REGEX_PATTERNS:
+            match = pattern.search(normalized)
+            if match:
+                return FilterResult(
+                    blocked=True,
+                    reason="direct_injection: close variant match",
+                    confidence=0.80,
+                    matched_pattern=pattern.pattern,
+                )
+
+        return FilterResult(blocked=False, reason=None, confidence=0.0, matched_pattern=None)
+
+    def _check_indirect_injection(self, text: str) -> FilterResult:
+        """
+        Instruction-like language embedded in what should be pure sensor/
+        maintenance data, SQL-like fragments, and role-assumption attempts.
+        """
+        normalized = _normalize(text)
+
+        for phrase in INDIRECT_IMPERATIVE_PHRASES:
+            if phrase in normalized:
+                return FilterResult(
+                    blocked=True,
+                    reason="indirect_injection: imperative command in data context",
+                    confidence=0.65,
+                    matched_pattern=phrase,
+                )
+
+        for pattern in SQL_LIKE_PATTERNS:
+            match = pattern.search(text)
+            if match:
+                return FilterResult(
+                    blocked=True,
+                    reason="indirect_injection: SQL-like pattern in sensor text",
+                    confidence=0.80,
+                    matched_pattern=pattern.pattern,
+                )
+
+        for pattern in ROLE_ASSUMPTION_PATTERNS:
+            match = pattern.search(text)
+            if match:
+                return FilterResult(
+                    blocked=True,
+                    reason="indirect_injection: role-assumption attempt",
+                    confidence=0.70,
+                    matched_pattern=pattern.pattern,
+                )
+
+        return FilterResult(blocked=False, reason=None, confidence=0.0, matched_pattern=None)
+
+    def _check_escalation(self, text: str) -> FilterResult:
+        """Attempts to directly trigger dangerous tool calls via text."""
+        normalized = _normalize(text)
+        for phrase in ESCALATION_PHRASES:
+            if phrase in normalized:
+                return FilterResult(
+                    blocked=True,
+                    reason="escalation: dangerous action phrase",
+                    confidence=0.90,
+                    matched_pattern=phrase,
+                )
+        return FilterResult(blocked=False, reason=None, confidence=0.0, matched_pattern=None)
+
+    def _check_encoding_obfuscation(self, text: str) -> FilterResult:
+        """Base64-looking runs, excessive special characters, or homoglyphs."""
+        # Long base64-alphabet run
+        match = BASE64_LIKE_PATTERN.search(text)
+        if match:
+            run_length = len(match.group(0))
+            # Longer runs are more suspicious; scale confidence, cap at 0.9
+            confidence = min(0.5 + (run_length - 40) * 0.01, 0.90)
+            return FilterResult(
+                blocked=True,
+                reason="encoding_obfuscation: base64-like character run",
+                confidence=round(confidence, 2),
+                matched_pattern=match.group(0)[:50] + ("..." if run_length > 50 else ""),
+            )
+
+        # Excessive special-character density (on non-trivial length text)
+        if len(text) >= 20:
+            special_count = sum(1 for ch in text if not (ch.isalnum() or ch.isspace()))
+            ratio = special_count / len(text)
+            if ratio > 0.30:
+                return FilterResult(
+                    blocked=True,
+                    reason="encoding_obfuscation: excessive special-character density",
+                    confidence=round(min(0.5 + ratio, 0.90), 2),
+                    matched_pattern=f"special_char_ratio={ratio:.2f}",
+                )
+
+        # Homoglyph characters mixed into otherwise-Latin text
+        has_latin = any(ch.isascii() and ch.isalpha() for ch in text)
+        homoglyphs_found = [ch for ch in text if ch in HOMOGLYPH_CHARS]
+        if has_latin and homoglyphs_found:
+            return FilterResult(
+                blocked=True,
+                reason="encoding_obfuscation: unicode homoglyph characters detected",
+                confidence=0.60,
+                matched_pattern=f"homoglyphs={''.join(sorted(set(homoglyphs_found)))}",
+            )
+
+        return FilterResult(blocked=False, reason=None, confidence=0.0, matched_pattern=None)
+
+    # ------------------------------------------------------------------
+    # OUTPUT detection categories (each independently evaluable)
+    # ------------------------------------------------------------------
+
+    def _check_invalid_tool_call(self, text: str) -> FilterResult:
+        """
+        Flags tool-call-shaped language in the agent's output that names
+        something outside the known-valid tool set — either a hallucinated
+        capability or an injected/escalated one.
+        """
+        for match in TOOL_CALL_SHAPE_PATTERN.finditer(text):
+            candidate = match.group(1).lower()
+            if candidate not in VALID_TOOL_CALL_NAMES:
+                return FilterResult(
+                    blocked=True,
+                    reason="invalid_tool_call: unrecognized tool/action name in output",
+                    confidence=0.75,
+                    matched_pattern=match.group(0),
+                )
+        return FilterResult(blocked=False, reason=None, confidence=0.0, matched_pattern=None)
+
+    def _check_overridden_instructions(self, text: str) -> FilterResult:
+        """Language suggesting the agent's system instructions were overridden."""
+        normalized = _normalize(text)
+        for phrase in OVERRIDDEN_INSTRUCTION_PHRASES:
+            if phrase in normalized:
+                return FilterResult(
+                    blocked=True,
+                    reason="overridden_instructions: agent claims new/overridden directive",
+                    confidence=0.90,
+                    matched_pattern=phrase,
+                )
+        return FilterResult(blocked=False, reason=None, confidence=0.0, matched_pattern=None)
+
+    def _check_urls(self, text: str) -> FilterResult:
+        """The agent should never produce URLs or external references."""
+        match = URL_PATTERN.search(text)
+        if match:
+            return FilterResult(
+                blocked=True,
+                reason="urls: agent output contains a URL or external reference",
+                confidence=0.85,
+                matched_pattern=match.group(0),
+            )
+        return FilterResult(blocked=False, reason=None, confidence=0.0, matched_pattern=None)
+
+    # ------------------------------------------------------------------
+    # Logging
+    # ------------------------------------------------------------------
+
+    def _log(self, result: FilterResult, direction: str, category: str, text: str) -> None:
+        """Append one JSON line per blocked event to data/logs/filter_log.jsonl."""
+        try:
+            self.log_path.parent.mkdir(parents=True, exist_ok=True)
+            entry = {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "direction": direction,           # "input" or "output"
+                "category": category,             # e.g. "_check_direct_injection"
+                "reason": result.reason,
+                "matched_pattern": result.matched_pattern,
+                "confidence": result.confidence,
+                "text_snippet": text[:200],        # truncated for log size / readability
+            }
+            with open(self.log_path, "a") as f:
+                f.write(json.dumps(entry) + "\n")
+        except Exception:
+            # Logging must never crash the filter itself. If the log write
+            # fails (e.g. read-only filesystem), we silently continue —
+            # screening still returns its result to the caller either way.
+            pass
+
+    # ------------------------------------------------------------------
+    # Summary statistics (feeds the dashboard's attack defence log)
+    # ------------------------------------------------------------------
+
+    def summary_stats(self) -> dict:
+        """
+        Read the filter log and return aggregate counts. Structure:
+
+            {
+                "total_blocked": int,
+                "by_category": {category: count, ...},
+                "by_direction": {"input": count, "output": count},
+                "by_reason_prefix": {reason_prefix: count, ...},
+            }
+
+        Returns all-zero structure if the log doesn't exist yet (e.g. a
+        fresh run with nothing blocked so far) rather than raising.
+        """
+        stats = {
+            "total_blocked": 0,
+            "by_category": {},
+            "by_direction": {},
+            "by_reason_prefix": {},
+        }
+
+        if not self.log_path.exists():
+            return stats
+
+        with open(self.log_path, "r") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    continue  # skip malformed log lines rather than crash
+
+                stats["total_blocked"] += 1
+
+                category = entry.get("category", "unknown")
+                stats["by_category"][category] = stats["by_category"].get(category, 0) + 1
+
+                direction = entry.get("direction", "unknown")
+                stats["by_direction"][direction] = stats["by_direction"].get(direction, 0) + 1
+
+                reason = entry.get("reason") or "unknown"
+                reason_prefix = reason.split(":")[0]
+                stats["by_reason_prefix"][reason_prefix] = (
+                    stats["by_reason_prefix"].get(reason_prefix, 0) + 1
+                )
+
+        return stats
