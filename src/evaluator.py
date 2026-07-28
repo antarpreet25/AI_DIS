@@ -168,6 +168,15 @@ class EvaluationReport:
         print("actual layer coverage in this evaluation scheme.")
         print()
 
+        # Identified by the 'multimodal_' attack_id prefix established by
+        # multimodal_attack_generator.py, since per_sample_results doesn't
+        # carry attack_type — a small, targeted addition, not a new
+        # EvaluationReport field.
+        multimodal_rows = [r for r in self.per_sample_results if r["attack_id"].startswith("multimodal")]
+        multimodal_blocked = sum(1 for r in multimodal_rows if r["actual_blocked_by"] is not None)
+        print(f"Multimodal samples: {len(multimodal_rows)} in dataset, {multimodal_blocked} blocked")
+        print()
+
         print("OVERALL SYSTEM")
         print(rule)
         asr = self.overall_attack_success_rate
@@ -219,18 +228,20 @@ class Evaluator:
         report.print_summary()
     """
 
-    def __init__(self, pipeline=None):
+    def __init__(self, pipeline=None, fresh_run: bool = True):
+        if fresh_run and pipeline is None:
+            # Clear stale ChromaDB and ZEDD baseline before building fresh pipeline
+            import shutil
+            chromadb_path = _PROJECT_ROOT / "data" / "chromadb"
+            zedd_path = _PROJECT_ROOT / "data" / "zedd_baseline.json"
+            if chromadb_path.exists():
+                shutil.rmtree(chromadb_path)
+            if zedd_path.exists():
+                zedd_path.unlink()
+
         if pipeline is not None:
             self.pipeline = pipeline
         else:
-            # Deliberately a FRESH Pipeline by default, not a shared/reused
-            # one: fresh state means fresh RAG memory, so this evaluation
-            # run isn't contaminated by attacks stored during some earlier
-            # run (which would let later samples in the same dataset get
-            # "caught" by rag_memory only because an EARLIER sample in
-            # THIS SAME run already seeded that exact pattern into memory
-            # — a subtler version of the same contamination risk, worth
-            # being aware of even with a fresh Pipeline: see run()'s note).
             from main import Pipeline
             self.pipeline = Pipeline()
 

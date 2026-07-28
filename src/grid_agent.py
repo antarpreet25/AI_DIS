@@ -272,7 +272,10 @@ def _validate_and_build(tool_input: dict) -> GridAssessment:
     tool_choice forcing a schema, we don't blindly trust external input."""
     risk_level = tool_input.get("risk_level")
     if risk_level not in VALID_RISK_LEVELS:
-        raise ValueError(f"Invalid risk_level from model: {risk_level!r}")
+        raise ValueError(
+            f"Invalid risk_level from model: {risk_level!r}\n"
+            f"Full tool_input received: {tool_input}"
+        )
 
     tool_call = tool_input.get("tool_call")
     if tool_call not in VALID_TOOL_CALLS:

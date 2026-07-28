@@ -258,6 +258,18 @@ class DefensiveTokens:
         normalized = _normalize(_safe_text(text))
         return any(phrase in normalized for phrase in DIRECT_INJECTION_EXACT_PHRASES)
 
+    def apply_adaptive(self, raw_text, layer1_flagged: bool) -> str:
+        """Use strict mode if Layer 1 (filtering.py) already flagged this
+        input as suspicious, soft mode otherwise — reserves the heavier
+        token overhead for inputs already under suspicion rather than
+        paying it on every routine call."""
+        original_mode = self.mode
+        self.mode = "strict" if layer1_flagged else "soft"
+        try:
+            return self.apply(raw_text)
+        finally:
+            self.mode = original_mode
+
     # ------------------------------------------------------------------
     # Summary statistics
     # ------------------------------------------------------------------

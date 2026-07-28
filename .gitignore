@@ -1,6 +1,10 @@
 venv/
 .env
+data/chromadb/
+data/logs/
+data/attacks/
+data/results/
+data/zedd_baseline.json
 __pycache__/
 *.pyc
 .DS_Store
-data/results/

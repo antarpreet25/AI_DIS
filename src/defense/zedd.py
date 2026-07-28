@@ -158,7 +158,7 @@ class ZEDDDetector:
 
     def __init__(
         self,
-        drift_threshold: float = 0.35,
+        drift_threshold: float = 0.42,
         pre_filter_threshold: float = 0.25,
         pre_filter_enabled: bool = True,
         model_name: str = DEFAULT_MODEL_NAME,
@@ -594,7 +594,7 @@ _POWERGRID_BASELINE_TEXTS = {
 
 def build_powergrid_baseline(
     pre_filter_enabled: bool = True,
-    drift_threshold: float = 0.35,
+    drift_threshold: float = 0.42,
     pre_filter_threshold: float = 0.25,
     category_thresholds: Optional[dict] = None,
     model=None,

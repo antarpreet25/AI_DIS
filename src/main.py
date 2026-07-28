@@ -53,6 +53,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import time
 from dataclasses import dataclass, asdict
 from pathlib import Path
@@ -73,6 +74,8 @@ DEFAULT_MODEL_NAME = "all-MiniLM-L6-v2"
 
 # See module docstring's "WHY A CATEGORY-CLASSIFICATION FALLBACK..." section.
 _UNCLASSIFIED_ATTACK_FALLBACK_CATEGORY = "indirect_injection"
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -149,6 +152,9 @@ class Pipeline:
 
         # Layer 5
         self.gate = HumanLoopGate()
+
+        # Lazy-created on first multimodal sample — see _get_multimodal_extractor()
+        self._multimodal_extractor = None
 
     @staticmethod
     def _load_shared_model(model_name: str):
@@ -277,8 +283,38 @@ class Pipeline:
         this method deliberately does NOT add a second store_attack()
         call, which would otherwise create a duplicate embedding every
         single time the same sample is evaluated.
+
+        Multimodal samples: if sample.image_path is set, the input text
+        actually run through the pipeline is EXTRACTED from that image
+        via MultimodalExtractor, not sample.wrapped_attack directly — the
+        image is the real attack delivery mechanism, and every
+        downstream layer should see what the agent would actually
+        receive. If extraction fails (returns ""), falls back to
+        sample.wrapped_attack with a logged warning, so one failed
+        extraction doesn't silently drop a sample from evaluation.
         """
-        return self.run(sample.wrapped_attack, sensor_readings, n_window=n_window)
+        input_text = sample.wrapped_attack
+        image_path = getattr(sample, "image_path", None)
+        if image_path:
+            extractor = self._get_multimodal_extractor()
+            extracted = extractor.extract(image_path)
+            if extracted:
+                input_text = extracted
+            else:
+                logger.warning(
+                    "Multimodal extraction returned empty text for %s (image_path=%s) "
+                    "— falling back to sample.wrapped_attack.",
+                    getattr(sample, "attack_id", "<unknown>"), image_path,
+                )
+        return self.run(input_text, sensor_readings, n_window=n_window)
+
+    def _get_multimodal_extractor(self):
+        """Lazy, cached — avoids constructing an Anthropic client for
+        every sample when most samples in a dataset aren't multimodal."""
+        if self._multimodal_extractor is None:
+            from multimodal_extractor import MultimodalExtractor
+            self._multimodal_extractor = MultimodalExtractor()
+        return self._multimodal_extractor
 
     def run_evaluation(self, dataset: list, sensor_readings: list, n_window: int = 10) -> list:
         """Run every sample in dataset through the pipeline, in order, and
