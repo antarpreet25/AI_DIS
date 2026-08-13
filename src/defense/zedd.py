@@ -158,7 +158,7 @@ class ZEDDDetector:
 
     def __init__(
         self,
-        drift_threshold: float = 0.42,
+        drift_threshold: float = 0.35,
         pre_filter_threshold: float = 0.25,
         pre_filter_enabled: bool = True,
         model_name: str = DEFAULT_MODEL_NAME,
@@ -594,7 +594,7 @@ _POWERGRID_BASELINE_TEXTS = {
 
 def build_powergrid_baseline(
     pre_filter_enabled: bool = True,
-    drift_threshold: float = 0.42,
+    drift_threshold: float = 0.35,
     pre_filter_threshold: float = 0.25,
     category_thresholds: Optional[dict] = None,
     model=None,
@@ -626,4 +626,197 @@ def build_powergrid_baseline(
         categories.extend([category] * len(texts))
 
     detector.build_baseline(normal_texts, categories, category_thresholds=category_thresholds)
+    return detector
+
+
+def build_enriched_baseline(
+    model=None,
+    model_name: str = DEFAULT_MODEL_NAME,
+    pre_filter_enabled: bool = True,
+    drift_threshold: float = 0.35,
+    pre_filter_threshold: float = 0.25,
+    category_thresholds: Optional[dict] = None,
+    data_root=None,
+) -> "ZEDDDetector":
+    """
+    Build a ZEDDDetector baseline from real generated sensor data rather
+    than the handful of hand-written example sentences in
+    build_powergrid_baseline(). Each category centroid is computed from
+    40-100 real texts instead of 6, making it far more representative of
+    the full spread of legitimate power-grid language.
+
+    WHY THIS IMPROVES DETECTION
+    ----------------------------
+    ZEDD flags inputs whose cosine similarity to the closest category
+    centroid falls below drift_threshold. A centroid computed from 6
+    hand-written examples is a coarse approximation of the true centre of
+    that category's embedding cluster. With 40-100 real examples the
+    centroid is more accurate, which means:
+      - Legitimate documents score higher (they're closer to a better
+        centroid), reducing false positive risk.
+      - Attack documents embedded in legitimate-sounding wrappers may
+        score differently depending on how much the wrapper dominates the
+        embedding — this is investigated empirically by running the
+        ZEDD diagnostic after building this baseline.
+
+    DATA SOURCES (all produced by sensor_generator.py --all)
+    ----------------------------------------------------------
+    sensor_readings   ← normal.json + gradual_load_increase.json (~98 texts)
+    maintenance_reports ← tap_changer_stress.json (~49 texts)
+    operator_notes    ← developing_thermal_fault.json + arcing_fault.json
+    system_alerts     ← grid_disturbance.json + false_data_injection.json
+
+    GRACEFUL DEGRADATION
+    ---------------------
+    If any log file is missing (e.g. sensor_generator.py hasn't been run
+    yet), that file is skipped with a printed warning. If an entire
+    category ends up with zero texts after loading all available files,
+    the category falls back to the corresponding hand-written texts from
+    _POWERGRID_BASELINE_TEXTS so the baseline always has at least one
+    data point per category.
+
+    FIELD NAMES
+    -----------
+    Uses the actual field names from sensor_generator.py's JSON output:
+    voltage_kv, load_pct, temperature_c, vibration_mm_s, frequency_hz,
+    oil_moisture_ppm. The dissolved_gas_ppm field is a nested dict and is
+    intentionally excluded — sentence-level embeddings of dissolved gas
+    values add noise rather than signal for this purpose.
+
+    Args:
+        model: optional pre-loaded SentenceTransformer instance (shared
+            with RAGMemory to avoid loading the model twice).
+        model_name: model to load if model is None.
+        pre_filter_enabled: passed to ZEDDDetector — set False for
+            ablation testing without the two-stage pre-filter.
+        drift_threshold: global threshold; per-category overrides via
+            category_thresholds take precedence.
+        pre_filter_threshold: stage-1 cutoff below which an input is
+            flagged without proceeding to stage-2.
+        category_thresholds: optional per-category drift thresholds,
+            e.g. {"sensor_readings": 0.30, "maintenance_reports": 0.40}.
+        data_root: project root Path. Defaults to two levels above this
+            file (i.e. AI_DIS/).
+
+    Returns:
+        A fully initialized ZEDDDetector with the enriched baseline built
+        and ready to call detect() on.
+    """
+    root = Path(data_root) if data_root else Path(__file__).resolve().parents[2]
+    logs_dir = root / "data" / "logs"
+
+    # ------------------------------------------------------------------
+    # File-to-category mapping
+    # ------------------------------------------------------------------
+    FILE_CATEGORY_MAP = {
+        "sensor_readings": [
+            "normal.json",
+            "gradual_load_increase.json",
+        ],
+        "maintenance_reports": [
+            "tap_changer_stress.json",
+        ],
+        "operator_notes": [
+            "developing_thermal_fault.json",
+            "arcing_fault.json",
+        ],
+        "system_alerts": [
+            "grid_disturbance.json",
+            "false_data_injection.json",
+        ],
+    }
+
+    def _reading_to_text(r: dict) -> str:
+        """Convert one sensor reading dict to a natural-language sentence.
+        Uses only scalar sensor fields — dissolved_gas_ppm is a nested
+        dict and is deliberately excluded."""
+        s = r.get("sensors", {})
+        parts = []
+        if "voltage_kv" in s:
+            parts.append(f"Voltage {s['voltage_kv']:.1f}kV")
+        if "load_pct" in s:
+            parts.append(f"load {s['load_pct']:.0f}%")
+        if "temperature_c" in s:
+            parts.append(f"temperature {s['temperature_c']:.1f}C")
+        if "vibration_mm_s" in s:
+            parts.append(f"vibration {s['vibration_mm_s']:.2f}mm/s")
+        if "frequency_hz" in s:
+            parts.append(f"frequency {s['frequency_hz']:.2f}Hz")
+        if "oil_moisture_ppm" in s:
+            parts.append(f"oil moisture {s['oil_moisture_ppm']:.1f}ppm")
+        base = ", ".join(parts) + "." if parts else ""
+        description = r.get("description", "")
+        return f"{base} {description}".strip() if description else base
+
+    def _load_log(filename: str) -> list:
+        """Load readings from one log file. Returns [] on any error."""
+        path = logs_dir / filename
+        if not path.exists():
+            print(f"[build_enriched_baseline] WARNING: {filename} not found "
+                  f"at {path} — skipping.")
+            return []
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            readings = data.get("readings", [])
+            if not readings:
+                print(f"[build_enriched_baseline] WARNING: {filename} has no "
+                      f"'readings' key or empty list — skipping.")
+            return readings
+        except Exception as exc:
+            print(f"[build_enriched_baseline] WARNING: failed to load "
+                  f"{filename}: {type(exc).__name__}: {exc} — skipping.")
+            return []
+
+    # ------------------------------------------------------------------
+    # Build per-category text lists from log files
+    # ------------------------------------------------------------------
+    category_texts: dict = {cat: [] for cat in FILE_CATEGORY_MAP}
+
+    for category, filenames in FILE_CATEGORY_MAP.items():
+        for filename in filenames:
+            readings = _load_log(filename)
+            texts = [_reading_to_text(r) for r in readings if _reading_to_text(r)]
+            category_texts[category].extend(texts)
+        print(f"[build_enriched_baseline] {category}: "
+              f"{len(category_texts[category])} texts loaded from files.")
+
+    # ------------------------------------------------------------------
+    # Fallback: any category with zero texts gets the hand-written
+    # examples from _POWERGRID_BASELINE_TEXTS so the baseline always
+    # has at least something per category.
+    # ------------------------------------------------------------------
+    for category, texts in category_texts.items():
+        if not texts:
+            fallback = _POWERGRID_BASELINE_TEXTS.get(category, [])
+            print(f"[build_enriched_baseline] WARNING: {category} has no data "
+                  f"from log files — falling back to {len(fallback)} "
+                  f"hand-written baseline texts.")
+            category_texts[category] = list(fallback)
+
+    # ------------------------------------------------------------------
+    # Build and return the detector
+    # ------------------------------------------------------------------
+    detector = ZEDDDetector(
+        drift_threshold=drift_threshold,
+        pre_filter_threshold=pre_filter_threshold,
+        pre_filter_enabled=pre_filter_enabled,
+        model_name=model_name,
+        model=model,
+    )
+
+    all_texts = []
+    all_categories = []
+    for category, texts in category_texts.items():
+        all_texts.extend(texts)
+        all_categories.extend([category] * len(texts))
+
+    detector.build_baseline(
+        all_texts,
+        all_categories,
+        category_thresholds=category_thresholds,
+    )
+
+    total = len(all_texts)
+    print(f"[build_enriched_baseline] Baseline built from {total} total texts "
+          f"across {len(category_texts)} categories.")
     return detector

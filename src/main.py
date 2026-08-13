@@ -63,7 +63,7 @@ from sensor_generator import build_scenarios, generate_readings, get_rolling_win
 from grid_agent import analyze_readings, GridAssessment
 from defense.filtering import InputOutputFilter, FilterResult
 from defense.defensive_tokens import DefensiveTokens
-from defense.zedd import ZEDDDetector, ZEDDResult, build_powergrid_baseline
+from defense.zedd import ZEDDDetector, ZEDDResult, build_enriched_baseline
 from defense.rag_memory import RAGMemory, RAGResult, ATTACK_CATEGORIES
 from defense.human_loop import HumanLoopGate, HumanLoopResult
 
@@ -142,7 +142,7 @@ class Pipeline:
             self.zedd = ZEDDDetector(model=self._shared_model, model_name=model_name)
             self.zedd.load_baseline(self.zedd_baseline_path)
         else:
-            self.zedd = build_powergrid_baseline(model=self._shared_model, model_name=model_name)
+            self.zedd = build_enriched_baseline(model=self._shared_model, model_name=model_name)
             self.zedd.save_baseline(self.zedd_baseline_path)
 
         # Layer 4 — RAGMemory auto-populates its centroids from any
