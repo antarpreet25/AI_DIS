@@ -1,0 +1,492 @@
+"""
+attack_pipeline.py
+
+Processing logic for the scaled dataset generation pipeline.
+
+Classes
+-------
+AttackInserter      : embeds an injection phrase into a CleanDocument
+                      at a contextually appropriate position, returning
+                      both the wrapped (injected) text and the clean
+                      counterpart.
+
+DatasetBuilder      : orchestrates generation of the full scaled dataset
+                      (200 attacks + 65 benign) by combining DocumentFactory
+                      and AttackTemplateLibrary via AttackInserter.
+
+TrainingPairBuilder : builds the fine-tuning training pairs file
+                      (injected-clean pairs + clean-clean pairs) from a
+                      completed dataset.
+"""
+
+from __future__ import annotations
+
+import json
+import random
+import sys
+from dataclasses import dataclass, field as dc_field
+from pathlib import Path
+from typing import Optional
+
+
+# ---------------------------------------------------------------------------
+# AttackInserter
+# ---------------------------------------------------------------------------
+
+class AttackInserter:
+    """
+    Embeds an injection phrase into a CleanDocument at a position that
+    matches the document's structure and the template's insertion_hint.
+
+    The key invariant: wrapped_attack and clean_counterpart differ by
+    EXACTLY the injected sentence — every other character is identical.
+    This makes each pair valid contrastive fine-tuning data for ZEDD.
+
+    insertion_hint values (from AttackTemplate)
+    -------------------------------------------
+    'body'           → main content section of the document
+    'recommendation' → recommendation / next-step section
+    'header'         → immediately after the document title block
+    'footer'         → last section before sign-off
+    'comment'        → inline annotation or field comment
+    'field'          → structured data field (sensor logs, SCADA alerts)
+    'any'            → inserter picks the best position automatically
+    """
+
+    # Section heading strings used to locate insertion points.
+    # Each document type maps hint labels to a line substring that
+    # marks where that section begins in the document text.
+    _SECTION_HEADINGS: dict[str, dict[str, str]] = {
+        "maintenance_report": {
+            "body":           "Condition assessment",
+            "recommendation": "Recommendation",
+            "header":         "Engineer:",
+            "footer":         "Signed:",
+            "comment":        "Work carried out",
+        },
+        "sensor_log": {
+            "body":           "Status:",
+            "field":          "Oil moisture:",
+            "comment":        "No alerts raised.",
+            "footer":         "No alerts raised.",
+            "header":         "Timestamp:",
+        },
+        "dga_report": {
+            "body":           "Interpretation",
+            "recommendation": "Recommendation",
+            "comment":        "Acetylene",
+            "field":          "Acetylene",
+            "footer":         "Recommendation",
+            "header":         "Substation:",
+        },
+        "operator_handover": {
+            "body":           "Shift summary",
+            "footer":         "Outstanding actions:",
+            "comment":        "Shift summary",
+            "header":         "Outgoing:",
+            "recommendation": "Outstanding actions:",
+        },
+        "scada_alert": {
+            "body":           "Alert type:",
+            "field":          "Severity:",
+            "comment":        "Resolution",
+            "footer":         "Resolution",
+            "header":         "Alert ID:",
+            "recommendation": "Resolution",
+        },
+        "maintenance_schedule": {
+            "body":           "Planned activities",
+            "footer":         "Access restrictions:",
+            "comment":        "Assigned engineers:",
+            "header":         "Substation:",
+            "recommendation": "Contact",
+        },
+        "technician_note": {
+            "body":           "On-site observations",
+            "comment":        "Next step",
+            "recommendation": "Next step",
+            "footer":         "Note closed by:",
+            "header":         "Location:",
+        },
+        "supplier_communication": {
+            "body":           "Our team will attend",
+            "footer":         "Regards,",
+            "comment":        "Please confirm",
+            "header":         "Dear",
+            "recommendation": "Please confirm",
+        },
+        "inspection_report": {
+            "body":           "Findings",
+            "recommendation": "Recommendation",
+            "comment":        "Actions taken",
+            "footer":         "Report approved by:",
+            "header":         "Overall asset condition:",
+        },
+    }
+
+    # Best default hint per document type when template says 'any'
+    _DEFAULT_HINT: dict[str, str] = {
+        "maintenance_report":     "body",
+        "sensor_log":             "comment",
+        "dga_report":             "body",
+        "operator_handover":      "body",
+        "scada_alert":            "field",
+        "maintenance_schedule":   "body",
+        "technician_note":        "comment",
+        "supplier_communication": "body",
+        "inspection_report":      "body",
+    }
+
+    def __init__(self, rng: Optional[random.Random] = None):
+        self._rng = rng or random.Random()
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def insert(self, doc, template) -> tuple[str, str]:
+        """
+        Embed template's injection text into doc at the position
+        indicated by template.insertion_hint.
+
+        Parameters
+        ----------
+        doc      : CleanDocument instance
+        template : AttackTemplate instance
+
+        Returns
+        -------
+        (wrapped_attack, clean_counterpart)
+            wrapped_attack    : doc.text with injection embedded
+            clean_counterpart : doc.text unchanged
+        """
+        injection = template.get_injection_text()
+        hint = template.insertion_hint
+
+        if hint == "any":
+            hint = self._DEFAULT_HINT.get(doc.document_type, "body")
+
+        wrapped = self._embed(doc.text, doc.document_type, hint, injection)
+
+        # Safety fallback — if embed found no suitable position, append
+        if wrapped == doc.text:
+            wrapped = doc.text + f"\n\nNote: {injection}"
+
+        return wrapped, doc.text   # (injected, clean)
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _embed(self, text: str, doc_type: str, hint: str, injection: str) -> str:
+        lines = text.split("\n")
+        section_map = self._SECTION_HEADINGS.get(doc_type, {})
+        heading = section_map.get(hint) or section_map.get("body")
+
+        if heading is None:
+            return text + f"\nNote: {injection}"
+
+        section_line = self._find_section_line(lines, heading)
+        if section_line == -1:
+            section_line = self._after_header(lines)
+
+        return self._splice(lines, section_line, injection, hint)
+
+    def _find_section_line(self, lines: list[str], heading: str) -> int:
+        hl = heading.lower()
+        for i, line in enumerate(lines):
+            if hl in line.lower():
+                return i
+        return -1
+
+    def _after_header(self, lines: list[str]) -> int:
+        passed = False
+        for i, line in enumerate(lines):
+            if line.strip():
+                passed = True
+            elif passed:
+                return i
+        return max(0, len(lines) - 2)
+
+    def _splice(self, lines: list[str], section_line: int,
+                injection: str, hint: str) -> str:
+        result = list(lines)
+
+        if hint == "header":
+            result.insert(section_line + 1, injection)
+
+        elif hint == "footer":
+            pos = max(0, section_line - 1)
+            result.insert(pos, injection)
+
+        elif hint in ("field", "comment"):
+            result.insert(section_line + 1, injection)
+
+        else:
+            # body / recommendation: insert after first content line
+            # following the section heading — mid-section placement
+            pos = section_line + 1
+            while pos < len(result) and not result[pos].strip():
+                pos += 1
+            if pos < len(result) and result[pos].strip():
+                pos += 1
+            result.insert(pos, injection)
+
+        return "\n".join(result)
+
+
+# ---------------------------------------------------------------------------
+# DatasetBuilder
+# ---------------------------------------------------------------------------
+
+class DatasetBuilder:
+    """
+    Orchestrates generation of 200 attack samples + 65 benign samples.
+
+    Template assignment
+    -------------------
+    All 180 text templates are shuffled once with the seeded RNG then
+    assigned to documents in round-robin order, ensuring every template
+    appears at least once and no document type is flooded with one
+    category.  When 200 > 180, the cycle wraps and a small number of
+    templates appear twice — always in a different document context.
+    """
+
+    BENIGN_COUNTS: dict[str, int] = {
+        "sensor_log":            15,
+        "maintenance_report":    15,
+        "dga_report":            10,
+        "operator_handover":     10,
+        "scada_alert":           10,
+        "maintenance_schedule":   5,
+    }
+
+    VARIANTS_PER_DOC: dict[str, int] = {
+        "sensor_log":            2,
+        "maintenance_report":    3,
+        "dga_report":            3,
+        "operator_handover":     3,
+        "scada_alert":           3,
+        "maintenance_schedule":  2,
+    }
+
+    def __init__(self, rng: Optional[random.Random] = None):
+        self._rng = rng or random.Random()
+        from attack_content import DocumentFactory, AttackTemplateLibrary
+        self._factory  = DocumentFactory(rng=self._rng)
+        self._lib      = AttackTemplateLibrary()
+        self._inserter = AttackInserter(rng=self._rng)
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def generate(self, AttackSampleClass) -> dict:
+        """
+        Generate the full scaled dataset.
+
+        Parameters
+        ----------
+        AttackSampleClass : the AttackSample dataclass from attack_generator
+
+        Returns
+        -------
+        {'attacks': list[AttackSample], 'benign': list[AttackSample]}
+        """
+        clean_docs = self._factory.generate_batch(self.BENIGN_COUNTS)
+        self._rng.shuffle(clean_docs)
+
+        benign  = self._build_benign(clean_docs, AttackSampleClass)
+        attacks = self._build_attacks(clean_docs, AttackSampleClass)
+
+        return {"attacks": attacks, "benign": benign}
+
+    # ------------------------------------------------------------------
+    # Benign builder
+    # ------------------------------------------------------------------
+
+    def _build_benign(self, clean_docs: list, AS) -> list:
+        benign = []
+        all_layers = [
+            "filtering", "defensive_tokens", "zedd",
+            "rag_memory", "human_loop",
+        ]
+        for i, doc in enumerate(clean_docs, start=1):
+            benign.append(AS(
+                attack_id          = f"benign_{i:03d}",
+                category           = "benign",
+                attack_type        = "none",
+                raw_attack         = "",
+                wrapped_attack     = doc.text,
+                clean_counterpart  = None,
+                expected_blocked_by  = [],
+                expected_slip_layers = list(all_layers),
+                difficulty         = "n/a",
+                ground_truth_risk  = "LOW",
+                image_path         = None,
+            ))
+        return benign
+
+    # ------------------------------------------------------------------
+    # Attack builder
+    # ------------------------------------------------------------------
+
+    def _build_attacks(self, clean_docs: list, AS) -> list:
+        all_templates = self._lib.all()
+        self._rng.shuffle(all_templates)
+        pool = list(all_templates)   # working copy for round-robin
+
+        attacks: list = []
+        cat_counters: dict[str, int] = {}
+        pool_idx = 0
+
+        for doc in clean_docs:
+            n = self.VARIANTS_PER_DOC.get(doc.document_type, 2)
+            chosen = self._pick_diverse(pool, pool_idx, n)
+            pool_idx = (pool_idx + n) % len(pool)
+
+            for template in chosen:
+                cat = template.category
+                cat_counters[cat] = cat_counters.get(cat, 0) + 1
+                prefix = cat.split("_")[0]
+                attack_id = f"{prefix}_{cat_counters[cat]:03d}"
+
+                wrapped, clean = self._inserter.insert(doc, template)
+
+                attacks.append(AS(
+                    attack_id          = attack_id,
+                    category           = cat,
+                    attack_type        = template.technique,
+                    raw_attack         = template.raw_phrase,
+                    wrapped_attack     = wrapped,
+                    clean_counterpart  = clean,
+                    expected_blocked_by  = list(template.expected_blocked_by),
+                    expected_slip_layers = list(template.expected_slip_layers),
+                    difficulty         = template.difficulty,
+                    ground_truth_risk  = template.ground_truth_risk,
+                    image_path         = None,
+                ))
+
+        return self._normalise(attacks, 200, pool, clean_docs, AS, cat_counters)
+
+    def _pick_diverse(self, pool: list, start: int, count: int) -> list:
+        """
+        Pick `count` templates starting at `start`, preferring
+        different categories for each slot.
+        """
+        picked: list = []
+        seen_cats: set = set()
+        idx = start
+        attempts = 0
+
+        while len(picked) < count and attempts < len(pool) * 2:
+            t = pool[idx % len(pool)]
+            if t.category not in seen_cats:
+                picked.append(t)
+                seen_cats.add(t.category)
+            elif len(picked) + (count - len(picked)) >= count:
+                # Allow repeat category only if we're stuck
+                picked.append(t)
+            idx += 1
+            attempts += 1
+
+        # Hard fallback
+        if len(picked) < count:
+            for j in range(count - len(picked)):
+                picked.append(pool[(start + j) % len(pool)])
+
+        return picked[:count]
+
+    def _normalise(self, attacks, target, pool, clean_docs, AS, cat_counters) -> list:
+        if len(attacks) >= target:
+            return attacks[:target]
+
+        shortfall = target - len(attacks)
+        for _ in range(shortfall):
+            doc      = self._rng.choice(clean_docs)
+            template = self._rng.choice(pool)
+            cat      = template.category
+            cat_counters[cat] = cat_counters.get(cat, 0) + 1
+            prefix   = cat.split("_")[0]
+            attack_id = f"{prefix}_{cat_counters[cat]:03d}"
+            wrapped, clean = self._inserter.insert(doc, template)
+            attacks.append(AS(
+                attack_id          = attack_id,
+                category           = cat,
+                attack_type        = template.technique,
+                raw_attack         = template.raw_phrase,
+                wrapped_attack     = wrapped,
+                clean_counterpart  = clean,
+                expected_blocked_by  = list(template.expected_blocked_by),
+                expected_slip_layers = list(template.expected_slip_layers),
+                difficulty         = template.difficulty,
+                ground_truth_risk  = template.ground_truth_risk,
+                image_path         = None,
+            ))
+        return attacks
+
+
+# ---------------------------------------------------------------------------
+# TrainingPairBuilder
+# ---------------------------------------------------------------------------
+
+class TrainingPairBuilder:
+    """
+    Builds training_pairs.json for zedd_trainer.py.
+
+    Pair types
+    ----------
+    label=0  injected-clean: one pair per attack sample (wrapped vs clean)
+    label=1  clean-clean   : each benign doc paired with 2 others (seed=42)
+
+    Schema
+    ------
+    [{"injected": str, "clean": str, "label": int}, ...]
+    """
+
+    def __init__(self, rng: Optional[random.Random] = None):
+        self._rng = rng or random.Random()
+
+    def build(self, attacks: list, benign: list) -> list[dict]:
+        pairs: list[dict] = []
+
+        # --- injected-clean pairs (label=0) ---
+        for s in attacks:
+            if s.clean_counterpart is None:
+                continue
+            pairs.append({
+                "injected": s.wrapped_attack,
+                "clean":    s.clean_counterpart,
+                "label":    0,
+            })
+
+        # --- clean-clean pairs (label=1) ---
+        # Use fixed seed=42 so pairs are identical across every run
+        pair_rng = random.Random(42)
+        texts = [s.wrapped_attack for s in benign]
+        for i, text_a in enumerate(texts):
+            candidates = [j for j in range(len(texts)) if j != i]
+            partners   = pair_rng.sample(candidates, k=min(2, len(candidates)))
+            for j in partners:
+                pairs.append({
+                    "injected": text_a,
+                    "clean":    texts[j],
+                    "label":    1,
+                })
+
+        pair_rng.shuffle(pairs)
+        return pairs
+
+    def save(self, pairs: list[dict], path) -> None:
+        out = Path(path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        with open(out, "w", encoding="utf-8") as f:
+            json.dump(pairs, f, indent=2, ensure_ascii=False)
+        n0 = sum(1 for p in pairs if p["label"] == 0)
+        n1 = sum(1 for p in pairs if p["label"] == 1)
+        print(f"[TrainingPairBuilder] {len(pairs)} pairs saved "
+              f"(label=0: {n0}, label=1: {n1}) → {out}")
+
+    def load(self, path) -> list[dict]:
+        with open(Path(path), encoding="utf-8") as f:
+            return json.load(f)

@@ -73,6 +73,7 @@ import json
 from dataclasses import dataclass, asdict, field
 from pathlib import Path
 from typing import Optional
+import random
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_DATASET_PATH = _PROJECT_ROOT / "data" / "attacks" / "attack_dataset.json"
@@ -93,10 +94,11 @@ class AttackSample:
     attack_type: str
     raw_attack: str                     # the injection payload itself ("" for benign)
     wrapped_attack: str                 # the payload embedded in a realistic power-grid document
+    clean_counterpart: Optional[str] = None
     expected_blocked_by: list = field(default_factory=list)
     expected_slip_layers: list = field(default_factory=list)
-    difficulty: str = "n/a"             # easy / medium / hard / n/a (benign)
-    ground_truth_risk: str = "LOW"      # LOW / MEDIUM / HIGH / CRITICAL
+    difficulty: str = "medium"             # easy / medium / hard / n/a (benign)
+    ground_truth_risk: str = "HIGH"      # LOW / MEDIUM / HIGH / CRITICAL
     image_path: Optional[str] = None    # set only for multimodal samples; None for all text-only samples
 
     def to_dict(self) -> dict:
@@ -142,6 +144,9 @@ class AttackGenerator:
         dataset = gen.load("data/attacks/attack_dataset.json")
         benign = gen.generate_benign()        # just the 10 clean samples
     """
+    def __init__(self, seed: int = 42):
+        self._seed = seed
+        self._data_root = _PROJECT_ROOT
 
     # ------------------------------------------------------------------
     # DIRECT INJECTION (8)
@@ -916,9 +921,40 @@ Interpretation: gas levels exceed Condition 1 thresholds across multiple indicat
             payload = json.load(f)
         return [AttackSample(**entry) for entry in payload["samples"]]
 
+    def generate_scaled_dataset(self) -> dict:
+        """Generate 200 attacks + 65 benign using the full pipeline."""
+        from attack_pipeline import DatasetBuilder, TrainingPairBuilder
+
+        builder = DatasetBuilder(rng=random.Random(self._seed))
+        dataset = builder.generate(AttackSample)
+
+        # Save main dataset
+        all_samples = dataset["attacks"] + dataset["benign"]
+        out_path = self._data_root / "data" / "attacks" / "attack_dataset_scaled.json"
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        self.save(all_samples, out_path)   # reuse save() which handles the wrapper
+        print(f"[AttackGenerator] Scaled dataset saved: "
+            f"{len(dataset['attacks'])} attacks + "
+            f"{len(dataset['benign'])} benign → {out_path}")
+
+        # Save training pairs
+        pair_builder = TrainingPairBuilder(rng=random.Random(self._seed))
+        pairs = pair_builder.build(dataset["attacks"], dataset["benign"])
+        pairs_path = self._data_root / "data" / "attacks" / "training_pairs.json"
+        pair_builder.save(pairs, pairs_path)
+
+        return dataset
+
+
 
 if __name__ == "__main__":
+    import sys
     generator = AttackGenerator()
-    full_dataset = generator.generate_all()
-    generator.save(full_dataset)
-    print(f"Generated {len(full_dataset)} samples -> {DEFAULT_DATASET_PATH}")
+    if "--scaled" in sys.argv:
+        result = generator.generate_scaled_dataset()
+        total = len(result["attacks"]) + len(result["benign"])
+        print(f"Generated scaled dataset: {total} samples total")
+    else:
+        full_dataset = generator.generate_all()
+        generator.save(full_dataset)
+        print(f"Generated {len(full_dataset)} samples -> {DEFAULT_DATASET_PATH}")
