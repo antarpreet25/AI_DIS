@@ -317,7 +317,7 @@ def step_state(
     state.voltage_kv = NOMINAL_VOLTAGE_KV - droop + rng.gauss(0, 0.03)
 
     # --- Frequency: weak load coupling (governor droop) + grid disturbances ---
-    # Fix 1: frequency now has a small, physically-motivated dependence on
+    # Fix: frequency now has a small, physically-motivated dependence on
     # local load, plus an independent grid-wide disturbance window that a
     # scenario can optionally define (e.g. grid_disturbance).
     load_coupling_hz = -(state.load_pct / 100.0) * 0.05
@@ -394,11 +394,11 @@ def step_state(
             if event_label is None:
                 event_label = "arcing_in_progress"  # only if no tap_change this step
 
-    # Fix 4: real transformer oil saturates with moisture around this level —
+    # Fix: real transformer oil saturates with moisture around this level —
     # moisture content cannot physically climb without bound, so cap it.
     state.oil_moisture_ppm = min(state.oil_moisture_ppm, OIL_MOISTURE_SATURATION_PPM)
 
-    # --- False data injection override (Fix 2) ------------------------------
+    # --- False data injection override (Fix) ------------------------------
     # This scenario simulates an ATTACKER overriding sensor readings, not
     # genuine equipment physics. We deliberately BREAK the load->temperature
     # and temperature->gas correlations here, overwriting whatever the real
@@ -514,7 +514,7 @@ def save_readings(readings: list, scenario: Scenario, output_path: Path) -> None
 
 
 # ---------------------------------------------------------------------------
-# Utilities for downstream consumers (grid_agent.py, etc.) — Fix 6
+# Utilities for downstream consumers (grid_agent.py, etc.)
 # ---------------------------------------------------------------------------
 
 def get_rolling_window(readings: list, n: int = 10) -> list:

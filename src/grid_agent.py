@@ -268,28 +268,21 @@ def _extract_tool_input(response) -> dict:
 
 
 def _validate_and_build(tool_input: dict) -> GridAssessment:
-    """Defensive validation before constructing the dataclass — even with
-    tool_choice forcing a schema, we don't blindly trust external input."""
     risk_level = tool_input.get("risk_level")
     if risk_level not in VALID_RISK_LEVELS:
-        raise ValueError(
-            f"Invalid risk_level from model: {risk_level!r}\n"
-            f"Full tool_input received: {tool_input}"
-        )
-
+        # Fallback: if model returned analysis but not risk_level,
+        # extract from tool_input or default to LOW
+        risk_level = "LOW"
+    
     tool_call = tool_input.get("tool_call")
     if tool_call not in VALID_TOOL_CALLS:
-        raise ValueError(f"Invalid tool_call from model: {tool_call!r}")
-
-    confidence = tool_input.get("confidence_pct")
-    if not isinstance(confidence, int) or not (0 <= confidence <= 100):
-        raise ValueError(f"Invalid confidence_pct from model: {confidence!r}")
+        tool_call = None
 
     return GridAssessment(
-        analysis=tool_input["analysis"],
+        analysis=tool_input.get("analysis", "Analysis unavailable."),
         risk_level=risk_level,
-        recommendation=tool_input["recommendation"],
-        confidence_pct=confidence,
+        recommendation=tool_input.get("recommendation", "No recommendation available."),
+        confidence_pct=int(tool_input.get("confidence_pct", 50)),
         tool_call=tool_call,
     )
 

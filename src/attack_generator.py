@@ -100,6 +100,7 @@ class AttackSample:
     difficulty: str = "medium"             # easy / medium / hard / n/a (benign)
     ground_truth_risk: str = "HIGH"      # LOW / MEDIUM / HIGH / CRITICAL
     image_path: Optional[str] = None    # set only for multimodal samples; None for all text-only samples
+    doc_type: str = "unknown"
 
     def to_dict(self) -> dict:
         return asdict(self)

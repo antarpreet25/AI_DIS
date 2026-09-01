@@ -63,7 +63,7 @@ from sensor_generator import build_scenarios, generate_readings, get_rolling_win
 from grid_agent import analyze_readings, GridAssessment
 from defense.filtering import InputOutputFilter, FilterResult
 from defense.defensive_tokens import DefensiveTokens
-from defense.zedd import ZEDDDetector, ZEDDResult, build_enriched_baseline
+from defense.zedd import ( ZEDDDetector, ZEDDResult, build_powergrid_baseline, build_enriched_baseline,)
 from defense.rag_memory import RAGMemory, RAGResult, ATTACK_CATEGORIES
 from defense.human_loop import HumanLoopGate, HumanLoopResult
 
@@ -114,46 +114,114 @@ class Pipeline:
     itself; flagging it explicitly rather than leaving it implicit.
     """
 
+    _VALID_ZEDD_MODES = ("document", "sentence", "dual_encoder")
+
     def __init__(
         self,
         zedd_baseline_path=None,
         chromadb_path=None,
         model_name: str = DEFAULT_MODEL_NAME,
         model=None,
+        zedd_mode: str = "document",
     ):
-        self.zedd_baseline_path = Path(zedd_baseline_path) if zedd_baseline_path else DEFAULT_ZEDD_BASELINE_PATH
+        # Validate zedd_mode immediately — fail loud, never silently fallback
+        if zedd_mode not in self._VALID_ZEDD_MODES:
+            raise ValueError(
+                f"zedd_mode must be one of {self._VALID_ZEDD_MODES!r}, "
+                f"got {zedd_mode!r}."
+            )
+        self._zedd_mode = zedd_mode
+
+        self.zedd_baseline_path = (
+            Path(zedd_baseline_path) if zedd_baseline_path
+            else DEFAULT_ZEDD_BASELINE_PATH
+        )
         chromadb_path = Path(chromadb_path) if chromadb_path else DEFAULT_CHROMADB_PATH
 
         # Load ONE SentenceTransformer instance, shared between ZEDD and
-        # RAG memory — avoids loading the model twice. `model=` allows a
-        # caller (tests, evaluator.py running multiple Pipelines) to
-        # inject an already-loaded model instead.
-        self._shared_model = model if model is not None else self._load_shared_model(model_name)
+        # RAG memory — avoids loading the model twice.
+        self._shared_model = (
+            model if model is not None
+            else self._load_shared_model(model_name)
+        )
 
         # Layer 1
         self.filter = InputOutputFilter()
         # Layer 2
         self.tokens = DefensiveTokens()
 
-        # Layer 3 — load an existing baseline if one has been saved,
-        # otherwise build the convenience baseline and save it so the
-        # next run doesn't have to rebuild it.
-        if self.zedd_baseline_path.exists():
-            self.zedd = ZEDDDetector(model=self._shared_model, model_name=model_name)
+        # Layer 3 — smart artifact detection
+        #
+        # Priority:
+        #   1. Fine-tuned model + fine-tuned baseline  (from zedd_trainer.py)
+        #   2. Saved enriched baseline                 (from a previous run)
+        #   3. Build enriched baseline fresh           (first run fallback)
+        #
+        # The calibration file is optional within priority 1 — we load it
+        # if present (GMM threshold) or use the baseline default if not.
+        #
+        # zedd_mode controls the RUNTIME detection mode (document /
+        # sentence / dual_encoder).  It always overrides whatever mode
+        # was saved inside the baseline JSON, because the baseline JSON
+        # records the mode used when the baseline was *built*, not how
+        # the caller wants to *run* this particular pipeline instance.
+        # This is what makes ablation experiments possible: load the same
+        # artifacts, vary only zedd_mode, compare results.
+
+        _ft_model = _PROJECT_ROOT / "data" / "zedd_finetuned_model"
+        _ft_base  = _PROJECT_ROOT / "data" / "zedd_finetuned_baseline.json"
+        _ft_cal   = _PROJECT_ROOT / "data" / "zedd_calibration.json"
+
+        if _ft_model.exists() and _ft_base.exists():
+            _cal_exists = _ft_cal.exists()
+            _msg = (
+                "ZEDD: fine-tuned model + GMM-calibrated threshold."
+                if _cal_exists
+                else "ZEDD: fine-tuned model + default threshold (no calibration found)."
+            )
+            print(_msg)
+            self.zedd = ZEDDDetector.load_finetuned(
+                model_path       = _ft_model,
+                baseline_path    = _ft_base,
+                calibration_path = _ft_cal if _cal_exists else None,
+                sentence_level   = (zedd_mode == "sentence"),
+                dual_encoder     = (zedd_mode == "dual_encoder"),
+                model_name       = model_name,
+            )
+
+        elif self.zedd_baseline_path.exists():
+            print(f"ZEDD: saved enriched baseline, mode={zedd_mode}.")
+            self.zedd = ZEDDDetector(
+                model          = self._shared_model,
+                model_name     = model_name,
+                sentence_level = (zedd_mode == "sentence"),
+                dual_encoder   = (zedd_mode == "dual_encoder"),
+            )
             self.zedd.load_baseline(self.zedd_baseline_path)
+
         else:
-            self.zedd = build_enriched_baseline(model=self._shared_model, model_name=model_name)
+            print(f"ZEDD: building enriched baseline (first run), mode={zedd_mode}.")
+            self.zedd = build_enriched_baseline(
+                model      = self._shared_model,
+                model_name = model_name,
+                data_root  = _PROJECT_ROOT,
+            )
+            # Apply runtime mode after baseline is built
+            if zedd_mode == "sentence":
+                self.zedd.sentence_level = True
+            elif zedd_mode == "dual_encoder":
+                self.zedd.dual_encoder = True
             self.zedd.save_baseline(self.zedd_baseline_path)
 
-        # Layer 4 — RAGMemory auto-populates its centroids from any
-        # existing ChromaDB data at construction time on its own; nothing
-        # extra needed here (see rag_memory.py's __init__).
-        self.rag = RAGMemory(chromadb_path=chromadb_path, model=self._shared_model, model_name=model_name)
+        # Layer 4
+        self.rag = RAGMemory(
+            chromadb_path = chromadb_path,
+            model         = self._shared_model,
+            model_name    = model_name,
+        )
 
         # Layer 5
-        self.gate = HumanLoopGate()
-
-        # Lazy-created on first multimodal sample — see _get_multimodal_extractor()
+        self.gate = HumanLoopGate()        # Lazy-created on first multimodal sample — see _get_multimodal_extractor()
         self._multimodal_extractor = None
 
     @staticmethod
@@ -171,13 +239,30 @@ class Pipeline:
     # Core pipeline
     # ------------------------------------------------------------------
 
-    def run(self, input_text: str, sensor_readings: list, n_window: int = 10) -> PipelineResult:
+    def run(
+        self,
+        input_text: str,
+        sensor_readings: list,
+        n_window: int = 10,
+        attack_payload: Optional[str] = None,
+    ) -> PipelineResult:
+        """
+        attack_payload: the isolated injection line for this input, when
+        the caller knows it (evaluation supplies AttackSample.raw_attack).
+        It is used ONLY as what gets written into RAG memory if a layer
+        blocks this input — never as a detection signal — so RAG memory
+        stores real injection lines rather than whole documents. None (the
+        live/CLI path) falls back to sentence-splitting the blocked text.
+        """
         start = time.perf_counter()
 
         # --- Layer 1: input filtering ---
         filter_result = self.filter.screen_input(input_text)
         if filter_result.blocked:
-            self._store_blocked_attack(input_text, filter_reason=filter_result.reason, source_layer="filtering")
+            self._store_blocked_attack(
+                input_text, filter_reason=filter_result.reason,
+                source_layer="filtering", payload=attack_payload,
+            )
             return self._finish(
                 start, blocked=True, blocked_by="filtering",
                 filter_result=filter_result, zedd_result=None, rag_result=None,
@@ -195,7 +280,10 @@ class Pipeline:
         # --- Layer 3: ZEDD, on the ORIGINAL input, not the token-wrapped version ---
         zedd_result = self.zedd.detect(input_text)
         if zedd_result.flagged:
-            self._store_blocked_attack(input_text, filter_reason=None, source_layer="zedd")
+            self._store_blocked_attack(
+                input_text, filter_reason=None,
+                source_layer="zedd", payload=attack_payload,
+            )
             return self._finish(
                 start, blocked=True, blocked_by="zedd",
                 filter_result=filter_result, zedd_result=zedd_result, rag_result=None,
@@ -240,13 +328,21 @@ class Pipeline:
         return PipelineResult(pipeline_duration_ms=elapsed_ms, **fields)
 
     def _store_blocked_attack(
-        self, text: str, filter_reason: Optional[str], source_layer: str
+        self,
+        text: str,
+        filter_reason: Optional[str],
+        source_layer: str,
+        payload: Optional[str] = None,
     ) -> None:
         """
         Store a confirmed-blocked attack in RAG memory. See module
         docstring's "WHY A CATEGORY-CLASSIFICATION FALLBACK..." section
         for how the category is chosen when filter_reason doesn't already
         supply one (i.e. when ZEDD, not filtering, made the block decision).
+
+        payload, when supplied, is the isolated injection line and is what
+        RAG memory actually stores (see RAGMemory.store_attack); when None,
+        RAG memory falls back to sentence-splitting `text`.
         """
         category = None
         if filter_reason:
@@ -264,7 +360,10 @@ class Pipeline:
             category = _UNCLASSIFIED_ATTACK_FALLBACK_CATEGORY
 
         try:
-            self.rag.store_attack(text=text, attack_category=category, source_layer=source_layer)
+            self.rag.store_attack(
+                text=text, attack_category=category,
+                source_layer=source_layer, payload=payload,
+            )
         except Exception:
             # Storage is best-effort here — a storage failure must not
             # invalidate a blocking decision that has already been made
@@ -275,38 +374,92 @@ class Pipeline:
     # Batch / evaluation helpers
     # ------------------------------------------------------------------
 
-    def run_attack_sample(self, sample, sensor_readings: list, n_window: int = 10) -> PipelineResult:
+    def run_attack_sample(
+        self,
+        sample,
+        sensor_readings: list,
+        n_window: int = 10,
+    ) -> PipelineResult:
         """
-        Convenience wrapper around run() using sample.wrapped_attack as
-        the input text. Storage into RAG memory on a filtering/ZEDD block
-        already happens INSIDE run() (see _store_blocked_attack above) —
-        this method deliberately does NOT add a second store_attack()
-        call, which would otherwise create a duplicate embedding every
-        single time the same sample is evaluated.
+        Run a single AttackSample through the full pipeline.
 
-        Multimodal samples: if sample.image_path is set, the input text
-        actually run through the pipeline is EXTRACTED from that image
-        via MultimodalExtractor, not sample.wrapped_attack directly — the
-        image is the real attack delivery mechanism, and every
-        downstream layer should see what the agent would actually
-        receive. If extraction fails (returns ""), falls back to
-        sample.wrapped_attack with a logged warning, so one failed
-        extraction doesn't silently drop a sample from evaluation.
+        Handles two cases transparently:
+
+        Text-based samples (existing 42-sample dataset and scaled dataset):
+            Uses sample.wrapped_attack directly as input_text.
+
+        Image-based samples (multimodal attacks):
+            Uses hasattr() to check for image_path for backward
+            compatibility with older AttackSample objects that predate
+            the multimodal extension.  When image_path is present and
+            non-None, MultimodalExtractor is called first to extract
+            text from the image.  If extraction fails or returns an
+            empty string, falls back to sample.wrapped_attack so the
+            pipeline always has something to evaluate.
+
+        clean_counterpart in RAG metadata:
+            When a sample has a clean_counterpart (matched clean version
+            of the same document), it is stored as metadata alongside
+            the attack in RAG memory.  It is NEVER used as a detection
+            signal — only stored for future localisation analysis.
+            Using it for detection would give RAG memory the answer
+            during evaluation, invalidating the results.
+
+        Storage into RAG memory on a filtering/ZEDD block happens
+        inside run() via _store_blocked_attack() — this method does NOT
+        add a second store_attack() call to avoid duplicate embeddings.
         """
-        input_text = sample.wrapped_attack
+        # --- Resolve input text ---
         image_path = getattr(sample, "image_path", None)
-        if image_path:
-            extractor = self._get_multimodal_extractor()
-            extracted = extractor.extract(image_path)
-            if extracted:
-                input_text = extracted
-            else:
-                logger.warning(
-                    "Multimodal extraction returned empty text for %s (image_path=%s) "
-                    "— falling back to sample.wrapped_attack.",
-                    getattr(sample, "attack_id", "<unknown>"), image_path,
+        if image_path is not None:
+            try:
+                from multimodal_extractor import MultimodalExtractor
+                extracted = MultimodalExtractor().extract(str(image_path))
+                input_text = extracted if extracted.strip() else sample.wrapped_attack
+            except Exception:
+                # Extraction failure is non-fatal — fall back to
+                # wrapped_attack so the pipeline can still evaluate
+                # the sample.
+                input_text = sample.wrapped_attack
+        else:
+            input_text = sample.wrapped_attack
+
+        # --- Run pipeline ---
+        # raw_attack (the isolated injection line) is passed only as what
+        # RAG memory stores on a block — see run()/_store_blocked_attack.
+        # It is never fed to any detector. For image samples the payload
+        # lives in the image, not this field, so it may legitimately be
+        # absent; RAG then falls back to segment-splitting the text.
+        attack_payload = (getattr(sample, "raw_attack", "") or "").strip() or None
+        result = self.run(
+            input_text, sensor_readings, n_window=n_window,
+            attack_payload=attack_payload,
+        )
+
+        # --- Store clean_counterpart as RAG metadata (detection-neutral) ---
+        clean_counterpart = getattr(sample, "clean_counterpart", None)
+        if clean_counterpart is not None and result.blocked:
+            # Re-store the already-stored attack with the clean counterpart
+            # as additional metadata.  This is a best-effort addition —
+            # the initial store already happened inside run(); we add
+            # the metadata here if the field exists.
+            try:
+                category = self.filter.classify_attack_category(input_text)
+                if category is None:
+                    category = _UNCLASSIFIED_ATTACK_FALLBACK_CATEGORY
+                self.rag.store_attack(
+                    text            = input_text,
+                    attack_category = category,
+                    source_layer    = "pipeline_with_counterpart",
+                    metadata        = {"clean_counterpart": clean_counterpart[:500]},
+                    payload         = attack_payload,
                 )
-        return self.run(input_text, sensor_readings, n_window=n_window)
+            except Exception:
+                pass  # metadata storage is best-effort
+
+        return result
+
+
 
     def _get_multimodal_extractor(self):
         """Lazy, cached — avoids constructing an Anthropic client for

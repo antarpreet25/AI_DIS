@@ -6,12 +6,18 @@ Layer 4 of the defense stack: RAG-based attack memory.
 CONCEPTUAL BASIS
 -----------------
 Every confirmed attack (one that another layer — filtering.py or ZEDD —
-has already blocked) gets stored as an embedding in a persistent vector
-database (ChromaDB). New inputs are checked against this memory: if an
-input is semantically close to a KNOWN attack, it gets flagged even if
-it has been rephrased enough to slip past ZEDD's drift-from-normal
-signal (Layer 3 asks "does this look normal?"; this layer asks "does
-this look like something we've specifically seen before?").
+has already blocked) gets stored in a persistent vector database
+(ChromaDB) as the embedding of its INJECTION LINE — the isolated
+malicious instruction, not the whole normal-looking document it was
+buried in (see ``_split_segments`` and ``store_attack``'s ``payload``
+argument for why whole-document storage makes this layer block every
+benign document that shares a report template with a stored attack).
+New inputs are split into segments and each segment is checked against
+this memory: if a segment is semantically close to a KNOWN injection
+line, the input gets flagged even if it has been rephrased enough to
+slip past ZEDD's drift-from-normal signal (Layer 3 asks "does this look
+normal?"; this layer asks "does this look like something we've
+specifically seen before?").
 
 This layer is intentionally COMPLEMENTARY to ZEDD, not a replacement:
     - ZEDD (Layer 3):   catches drift AWAY from normal language.
@@ -115,6 +121,29 @@ def _cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
     return float(np.dot(a, b) / (norm_a * norm_b))
 
 
+def _split_segments(text: str, min_chars: int) -> list:
+    """Split text into sentence/line segments, keeping only those at least
+    ``min_chars`` long.
+
+    WHY SEGMENT-LEVEL RATHER THAN WHOLE-DOCUMENT
+    --------------------------------------------
+    Attacks in this project are a single injected instruction dropped into
+    an otherwise-normal grid document (a SCADA alert, a maintenance
+    report). At whole-document granularity an attack and its clean
+    counterpart embed ~0.98 cosine-similar, so a benign document also
+    lands ~0.98 from any stored attack that shares the same report
+    template — every benign input matches and RAG blocks everything.
+    Matching one sentence at a time isolates the injected line: the
+    boilerplate sentences a benign document shares with a stored attack
+    are never themselves stored (only the payload is), so a benign
+    document has no segment that lands near a stored payload.
+    """
+    import re
+
+    parts = re.split(r"(?<=[.!?])\s+|\n+", text.strip())
+    return [p.strip() for p in parts if len(p.strip()) >= min_chars]
+
+
 def _sanitize_metadata(metadata: Optional[dict]) -> dict:
     """ChromaDB metadata values must be str/int/float/bool/None (or list of
     those) — no nested dicts. Coerce anything else to a string rather than
@@ -178,14 +207,16 @@ class RAGMemory:
     def __init__(
         self,
         chromadb_path=None,
-        rag_similarity_threshold: float = 0.75,
-        rag_pre_filter_threshold: float = 0.30,
+        rag_similarity_threshold: float = 0.70,
+        rag_pre_filter_threshold: float = 0.45,
+        rag_segment_min_chars: int = 16,
         model=None,
         model_name: str = DEFAULT_MODEL_NAME,
         log_path: Optional[Path] = None,
     ):
         self.rag_similarity_threshold = rag_similarity_threshold
         self.rag_pre_filter_threshold = rag_pre_filter_threshold
+        self.rag_segment_min_chars = rag_segment_min_chars
         self._model = model  # shared-instance support, see class docstring
         self._model_name = model_name
         self.log_path = Path(log_path) if log_path else RAG_MEMORY_LOG_PATH
@@ -245,12 +276,29 @@ class RAGMemory:
         attack_category: str,
         source_layer: str,
         metadata: Optional[dict] = None,
+        payload: Optional[str] = None,
     ) -> None:
         """
         Store a CONFIRMED attack in memory. This should only be called by
         the pipeline after another layer has already blocked the input —
         see the module docstring's security note on why storage is kept
         explicit rather than automatic.
+
+        WHAT ACTUALLY GETS STORED
+        -------------------------
+        Not the whole ``text``. Memory is stored at SEGMENT granularity so
+        ``check()`` can match the injected instruction rather than the
+        surrounding normal-looking document (see ``_split_segments``):
+
+          - If ``payload`` is given (the isolated injection line — e.g.
+            ``AttackSample.raw_attack``, or an operator-curated signature),
+            exactly that one string is stored.
+          - Otherwise ``text`` is split into sentence/line segments and
+            each is stored as its own row. This fallback is only for
+            callers that have no payload to hand (e.g. the live CLI); the
+            evaluation and pipeline paths always pass ``payload`` so the
+            store holds only real injection lines, never document
+            boilerplate.
 
         Raises:
             ValueError: if attack_category is not one of ATTACK_CATEGORIES.
@@ -264,11 +312,14 @@ class RAGMemory:
             )
 
         text = _safe_text(text)
-        vec = self._embed(text)
-        record_id = uuid.uuid4().hex
+        payload = _safe_text(payload).strip()
+        if payload:
+            segments = [payload]
+        else:
+            segments = _split_segments(text, self.rag_segment_min_chars) or [text]
 
-        full_metadata = _sanitize_metadata(metadata)
-        full_metadata.update(
+        base_metadata = _sanitize_metadata(metadata)
+        base_metadata.update(
             {
                 "attack_category": attack_category,
                 "source_layer": _safe_text(source_layer),
@@ -276,18 +327,35 @@ class RAGMemory:
             }
         )
 
+        ids = []
+        embeddings = []
+        documents = []
+        metadatas = []
+        for i, segment in enumerate(segments):
+            ids.append(uuid.uuid4().hex)
+            embeddings.append(self._embed(segment).tolist())
+            documents.append(segment)
+            seg_metadata = dict(base_metadata)
+            seg_metadata["segment_index"] = i
+            seg_metadata["n_segments"] = len(segments)
+            metadatas.append(seg_metadata)
+
         self.collections[attack_category].add(
-            ids=[record_id],
-            embeddings=[vec.tolist()],
-            documents=[text],
-            metadatas=[full_metadata],
+            ids=ids,
+            embeddings=embeddings,
+            documents=documents,
+            metadatas=metadatas,
         )
 
         # Recompute just this category's centroid rather than all four —
         # store_attack() calls should stay cheap even with a large memory.
         self.update_centroids(category=attack_category)
 
-        self._log_store(text=text, attack_category=attack_category, source_layer=source_layer)
+        self._log_store(
+            text=segments[0] if len(segments) == 1 else text,
+            attack_category=attack_category,
+            source_layer=source_layer,
+        )
 
     # ------------------------------------------------------------------
     # Centroid maintenance
@@ -343,17 +411,24 @@ class RAGMemory:
         """
         Check input_text against stored attack memory.
 
+        The input is split into sentence/line SEGMENTS and every stage
+        works on those segments, not the whole document — see
+        ``_split_segments`` for why. A document is flagged if ANY of its
+        segments matches a stored injection line; the reported
+        similarity_score is that best single-segment match.
+
         Stage 1: if nothing is stored anywhere yet, return flagged=False
             immediately — there is nothing to match against.
-        Stage 2: cheap pre-filter against category CENTROIDS. If the
-            input isn't sufficiently close to any category's centroid,
+        Stage 2: cheap pre-filter against category CENTROIDS. For each
+            category, take the closest of the input's segments to that
+            category centroid. If no segment is close to any category,
             skip ChromaDB entirely and return flagged=False.
         Stage 3: for categories that passed the pre-filter, query that
-            category's ChromaDB collection (n_results=3) and take the
-            best match. Flag only if that match's similarity clears
-            rag_similarity_threshold (deliberately higher than ZEDD's
-            threshold — a "this matches a known attack" claim should be
-            high-precision).
+            category's ChromaDB collection with each segment and take the
+            best match across all segments. Flag only if that match's
+            similarity clears rag_similarity_threshold (deliberately
+            higher than ZEDD's threshold — a "this matches a known
+            attack" claim should be high-precision).
         """
         self._ensure_centroids_current()
 
@@ -372,11 +447,15 @@ class RAGMemory:
             return result
 
         text = _safe_text(input_text)
-        vec = self._embed(text)
+        segments = _split_segments(text, self.rag_segment_min_chars) or [text]
+        seg_vecs = [self._embed(s) for s in segments]
 
         # --- Stage 2: pre-filter against category centroids ---
+        # A category is "plausible" if ANY single segment of the input is
+        # close to that category's centroid — one injected line is enough
+        # to warrant searching the category, even in a long document.
         category_sims = {
-            cat: _cosine_similarity(vec, centroid)
+            cat: max(_cosine_similarity(sv, centroid) for sv in seg_vecs)
             for cat, centroid in self.category_centroids.items()
             if centroid is not None
         }
@@ -425,27 +504,34 @@ class RAGMemory:
         best_category = None
         best_similarity = -1.0
         best_document = ""
+        best_input_segment = ""
 
         for cat in passing_categories:
             collection = self.collections[cat]
             count = collection.count()
             if count == 0:
                 continue
+            # One query call for the whole document — one row of results
+            # per input segment.
             query_result = collection.query(
-                query_embeddings=[vec.tolist()],
+                query_embeddings=[sv.tolist() for sv in seg_vecs],
                 n_results=min(3, count),
             )
-            ids = query_result.get("ids") or [[]]
-            if not ids[0]:
-                continue
-            top_distance = query_result["distances"][0][0]
-            top_similarity = 1.0 - top_distance  # cosine space: distance = 1 - cosine_similarity
-            top_document = query_result["documents"][0][0] if query_result.get("documents") else ""
-
-            if top_similarity > best_similarity:
-                best_category = cat
-                best_similarity = top_similarity
-                best_document = top_document
+            distances = query_result.get("distances") or []
+            documents = query_result.get("documents") or []
+            for seg_idx, seg_distances in enumerate(distances):
+                if not seg_distances:
+                    continue
+                top_similarity = 1.0 - seg_distances[0]  # cosine space: distance = 1 - cosine_similarity
+                if top_similarity > best_similarity:
+                    best_category = cat
+                    best_similarity = top_similarity
+                    best_document = (
+                        documents[seg_idx][0]
+                        if seg_idx < len(documents) and documents[seg_idx]
+                        else ""
+                    )
+                    best_input_segment = segments[seg_idx]
 
         if best_category is None:
             # passing_categories was non-empty but every one of them had
@@ -471,9 +557,9 @@ class RAGMemory:
                 matched_attack_snippet=_safe_text(best_document)[:100],
                 pre_filter_passed=True,
                 reason=(
-                    f"stage3: input matches known {best_category} attack with "
-                    f"similarity {best_similarity:.3f} >= rag_similarity_threshold="
-                    f"{self.rag_similarity_threshold}"
+                    f"stage3: input segment {best_input_segment[:80]!r} matches known "
+                    f"{best_category} attack line with similarity {best_similarity:.3f} "
+                    f">= rag_similarity_threshold={self.rag_similarity_threshold}"
                 ),
                 confidence=round(min(0.99, best_similarity), 2),
             )

@@ -733,15 +733,15 @@ class AttackTemplate:
                       raw_phrase before embedding (used for encoding
                       attacks).  None means use raw_phrase as-is.
     """
-    technique: str
-    category: str
-    raw_phrase: str
-    difficulty: str
-    expected_blocked_by: list
-    expected_slip_layers: list
-    ground_truth_risk: str
-    insertion_hint: str = "body"
-    encode_fn: object = None   # callable or None
+    technique: str           # machine-readable name e.g. "explicit_override_1"
+    category: str            # direct_injection / indirect_injection / escalation / encoding_obfuscation
+    raw_phrase: str          # the injection text itself
+    difficulty: str          # easy / medium / hard
+    expected_blocked_by: list  # which layers should catch this
+    expected_slip_layers: list # which layers won't catch it by design
+    ground_truth_risk: str   # LOW / MEDIUM / HIGH / CRITICAL
+    insertion_hint: str      # where in the document to embed it
+    encode_fn: object = None     # callable or None
 
     def get_injection_text(self) -> str:
         """Return the text to embed — encoded if encode_fn is set."""

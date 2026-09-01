@@ -27,6 +27,7 @@ import sys
 from dataclasses import dataclass, field as dc_field
 from pathlib import Path
 from typing import Optional
+from collections import defaultdict
 
 
 # ---------------------------------------------------------------------------
@@ -318,12 +319,13 @@ class DatasetBuilder:
                 attack_type        = "none",
                 raw_attack         = "",
                 wrapped_attack     = doc.text,
-                clean_counterpart  = None,
+                clean_counterpart  = doc.text,
                 expected_blocked_by  = [],
                 expected_slip_layers = list(all_layers),
                 difficulty         = "n/a",
                 ground_truth_risk  = "LOW",
                 image_path         = None,
+                doc_type           = getattr(doc, "document_type", "unknown")
             ))
         return benign
 
@@ -365,35 +367,44 @@ class DatasetBuilder:
                     difficulty         = template.difficulty,
                     ground_truth_risk  = template.ground_truth_risk,
                     image_path         = None,
+                    doc_type           = getattr(doc, "document_type", "unknown")
                 ))
 
         return self._normalise(attacks, 200, pool, clean_docs, AS, cat_counters)
 
     def _pick_diverse(self, pool: list, start: int, count: int) -> list:
         """
-        Pick `count` templates starting at `start`, preferring
-        different categories for each slot.
+        Pick `count` templates starting from `start` in round-robin order.
+        Pass 1: Collects only unique categories.
+        Pass 2: Fills remaining slots with unselected items if count is not met.
         """
+        if not pool or count <= 0:
+            return []
+
+        n = len(pool)
         picked: list = []
         seen_cats: set = set()
-        idx = start
-        attempts = 0
+        used_indices: set = set()
 
-        while len(picked) < count and attempts < len(pool) * 2:
-            t = pool[idx % len(pool)]
-            if t.category not in seen_cats:
-                picked.append(t)
-                seen_cats.add(t.category)
-            elif len(picked) + (count - len(picked)) >= count:
-                # Allow repeat category only if we're stuck
-                picked.append(t)
-            idx += 1
-            attempts += 1
+        # Pass 1: Walk the pool once to pick unique categories only
+        for offset in range(n):
+            idx = (start + offset) % n
+            template = pool[idx]
+            if template.category not in seen_cats:
+                picked.append(template)
+                seen_cats.add(template.category)
+                used_indices.add(idx)
+                if len(picked) == count:
+                    return picked
 
-        # Hard fallback
-        if len(picked) < count:
-            for j in range(count - len(picked)):
-                picked.append(pool[(start + j) % len(pool)])
+        # Pass 2: Fill remaining required slots with remaining pool items
+        for offset in range(n):
+            idx = (start + offset) % n
+            if idx not in used_indices:
+                picked.append(pool[idx])
+                used_indices.add(idx)
+                if len(picked) == count:
+                    return picked
 
         return picked[:count]
 
@@ -416,12 +427,13 @@ class DatasetBuilder:
                 attack_type        = template.technique,
                 raw_attack         = template.raw_phrase,
                 wrapped_attack     = wrapped,
-                clean_counterpart  = clean,
+                clean_counterpart  = doc.text,
                 expected_blocked_by  = list(template.expected_blocked_by),
                 expected_slip_layers = list(template.expected_slip_layers),
                 difficulty         = template.difficulty,
                 ground_truth_risk  = template.ground_truth_risk,
                 image_path         = None,
+                doc_type           = getattr(doc, "document_type", "unknown")
             ))
         return attacks
 
@@ -447,36 +459,58 @@ class TrainingPairBuilder:
     def __init__(self, rng: Optional[random.Random] = None):
         self._rng = rng or random.Random()
 
+
     def build(self, attacks: list, benign: list) -> list[dict]:
         pairs: list[dict] = []
 
-        # --- injected-clean pairs (label=0) ---
+        # --- 1. Injected vs Clean Pairs (label=0) ---
+        # 1:1 pairing between injected doc and its exact clean origin doc
         for s in attacks:
-            if s.clean_counterpart is None:
-                continue
-            pairs.append({
-                "injected": s.wrapped_attack,
-                "clean":    s.clean_counterpart,
-                "label":    0,
-            })
-
-        # --- clean-clean pairs (label=1) ---
-        # Use fixed seed=42 so pairs are identical across every run
-        pair_rng = random.Random(42)
-        texts = [s.wrapped_attack for s in benign]
-        for i, text_a in enumerate(texts):
-            candidates = [j for j in range(len(texts)) if j != i]
-            partners   = pair_rng.sample(candidates, k=min(2, len(candidates)))
-            for j in partners:
+            clean_source = getattr(s, "clean_counterpart", None)
+            if clean_source:
                 pairs.append({
-                    "injected": text_a,
-                    "clean":    texts[j],
-                    "label":    1,
+                    "text1": s.wrapped_attack,
+                    "text2":    clean_source,
+                    "label":    0,
+                    "doc_type": getattr(s, "doc_type", "unknown"),
                 })
+
+        # --- 2. Clean vs Clean Pairs (label=1) ---
+        # Group strictly by document type; NO fallback to cross-category
+        pair_rng = random.Random(42)
+        grouped_benign = defaultdict(list)
+        
+        for b in benign:
+            doc_type = getattr(b, "doc_type", "unknown")
+            grouped_benign[doc_type].append(b.wrapped_attack)
+
+        for doc_type, texts in grouped_benign.items():
+            n = len(texts)
+            if n < 2:
+                # Cannot form intra-category pairs for a category with only 1 sample
+                continue
+
+            for i in range(n):
+                text_a = texts[i]
+                # Filter candidates strictly within the SAME category
+                same_cat_candidates = [t for j, t in enumerate(texts) if j != i]
+                
+                # Sample up to 2 unique partners from the same category
+                k = min(2, len(same_cat_candidates))
+                partners = pair_rng.sample(same_cat_candidates, k=k)
+                
+                for text_b in partners:
+                    pairs.append({
+                        "text1": text_a,
+                        "text2":    text_b,
+                        "label":    1,
+                        "doc_type": doc_type,
+                    })
 
         pair_rng.shuffle(pairs)
         return pairs
 
+    
     def save(self, pairs: list[dict], path) -> None:
         out = Path(path)
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -490,3 +524,32 @@ class TrainingPairBuilder:
     def load(self, path) -> list[dict]:
         with open(Path(path), encoding="utf-8") as f:
             return json.load(f)
+
+# ---------------------------------------------------------------------------
+# CLI Entry Point
+# ---------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    from attack_generator import AttackSample  # Import your AttackSample dataclass
+    
+    print("[attack_pipeline] Starting dataset generation...")
+    
+    # 1. Initialize builder with a fixed seed for reproducibility
+    builder = DatasetBuilder(rng=random.Random(42))
+    
+    # 2. Generate attacks (200) and benign (65) samples
+    data = builder.generate(AttackSample)
+    attacks = data["attacks"]
+    benign = data["benign"]
+    
+    print(f"[attack_pipeline] Generated {len(attacks)} attacks and {len(benign)} benign samples.")
+    
+    # 3. Build training pairs for ZEDD
+    pair_builder = TrainingPairBuilder()
+    pairs = pair_builder.build(attacks=attacks, benign=benign)
+    
+    # 4. Save to data/training_pairs.json
+    output_path = Path("data/training_pairs.json")
+    pair_builder.save(pairs, output_path)
+    
+    print("[attack_pipeline] Pipeline completed successfully!")
