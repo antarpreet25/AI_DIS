@@ -1,0 +1,66 @@
+{
+  "threshold": 0.741241,
+  "modes": {
+    "document": {
+      "runtime_drift_threshold": 0.258759,
+      "applies_to_runtime_decision": false,
+      "suspicion_cutoff": 0.741241,
+      "selection_method": "gmm_crossing",
+      "flag_rule": "closest_category_similarity < per_category_threshold  (runtime_drift_threshold unused)",
+      "gmm_crossing_suspicion": 0.741241,
+      "eval": {
+        "tp": 168,
+        "fn": 32,
+        "fp": 0,
+        "tn": 65,
+        "recall": 0.84,
+        "fpr": 0.0
+      },
+      "attack_suspicion_mean": 1.003737,
+      "benign_suspicion_mean": 0.383825
+    },
+    "sentence": {
+      "runtime_drift_threshold": 0.330094,
+      "applies_to_runtime_decision": true,
+      "suspicion_cutoff": 0.669906,
+      "selection_method": "gmm_crossing",
+      "flag_rule": "worst_sentence_similarity < runtime_drift_threshold",
+      "gmm_crossing_suspicion": 0.669906,
+      "eval": {
+        "tp": 151,
+        "fn": 49,
+        "fp": 0,
+        "tn": 65,
+        "recall": 0.755,
+        "fpr": 0.0
+      },
+      "attack_suspicion_mean": 0.867448,
+      "benign_suspicion_mean": 0.260049
+    },
+    "dual_encoder": {
+      "runtime_drift_threshold": 0.788784,
+      "applies_to_runtime_decision": true,
+      "suspicion_cutoff": 0.788784,
+      "selection_method": "gmm_crossing",
+      "flag_rule": "combined_score > runtime_drift_threshold",
+      "gmm_crossing_suspicion": 0.788784,
+      "eval": {
+        "tp": 150,
+        "fn": 50,
+        "fp": 0,
+        "tn": 65,
+        "recall": 0.75,
+        "fpr": 0.0
+      },
+      "attack_suspicion_mean": 0.887124,
+      "benign_suspicion_mean": 0.580854
+    }
+  },
+  "n_attack_samples": 200,
+  "n_benign_samples": 65,
+  "model": "data/zedd_finetuned_model",
+  "baseline": "data/zedd_finetuned_baseline.json",
+  "training_seed": 42,
+  "dataset_seed": 42,
+  "_note": "Per-mode ZEDD thresholds. zedd.py:load_finetuned selects modes[<active mode>].threshold. Calibration suspicion orientation is 'higher = more suspicious' (document/sentence: 1 - similarity_score; dual_encoder: combined_score)."
+}

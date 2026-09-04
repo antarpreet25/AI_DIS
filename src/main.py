@@ -280,9 +280,17 @@ class Pipeline:
         # --- Layer 3: ZEDD, on the ORIGINAL input, not the token-wrapped version ---
         zedd_result = self.zedd.detect(input_text)
         if zedd_result.flagged:
+            # Prefer ground-truth payload (evaluation) when available; in
+            # live use (no ground truth) fall back to the specific
+            # sentence ZEDD itself localised as the reason for flagging
+            # (sentence/dual-encoder modes only — document mode has no
+            # such localisation). RAGMemory.store_attack() stores nothing
+            # at all if this is still None — see its docstring for why a
+            # whole-document fallback there was unsafe.
+            zedd_payload = attack_payload or getattr(zedd_result, "worst_sentence", None)
             self._store_blocked_attack(
                 input_text, filter_reason=None,
-                source_layer="zedd", payload=attack_payload,
+                source_layer="zedd", payload=zedd_payload,
             )
             return self._finish(
                 start, blocked=True, blocked_by="zedd",

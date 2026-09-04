@@ -1,63 +1,64 @@
 {
-  "threshold": 0.192943,
+  "threshold": 1.216408,
   "modes": {
     "document": {
-      "runtime_drift_threshold": 0.807057,
+      "runtime_drift_threshold": -0.216408,
       "applies_to_runtime_decision": false,
-      "suspicion_cutoff": 0.192943,
-      "selection_method": "gmm_crossing",
+      "suspicion_cutoff": 1.216408,
+      "selection_method": "fpr_target",
       "flag_rule": "closest_category_similarity < per_category_threshold  (runtime_drift_threshold unused)",
-      "gmm_crossing_suspicion": 0.192943,
+      "gmm_crossing_suspicion": 0.905185,
       "eval": {
-        "tp": 200,
-        "fn": 0,
-        "fp": 0,
-        "tn": 65,
-        "recall": 1.0,
-        "fpr": 0.0
+        "tp": 265,
+        "fn": 235,
+        "fp": 8,
+        "tn": 492,
+        "recall": 0.53,
+        "fpr": 0.016
       },
-      "attack_suspicion_mean": 0.911278,
-      "benign_suspicion_mean": 0.124497
+      "attack_suspicion_mean": 1.207429,
+      "benign_suspicion_mean": 0.697542
     },
     "sentence": {
-      "runtime_drift_threshold": -0.153701,
+      "runtime_drift_threshold": 0.168405,
       "applies_to_runtime_decision": true,
-      "suspicion_cutoff": 1.153701,
+      "suspicion_cutoff": 0.831595,
       "selection_method": "fpr_target",
       "flag_rule": "worst_sentence_similarity < runtime_drift_threshold",
-      "gmm_crossing_suspicion": 0.597641,
+      "gmm_crossing_suspicion": 0.471945,
       "eval": {
-        "tp": 42,
-        "fn": 158,
-        "fp": 0,
-        "tn": 65,
-        "recall": 0.21,
-        "fpr": 0.0
+        "tp": 376,
+        "fn": 124,
+        "fp": 8,
+        "tn": 492,
+        "recall": 0.752,
+        "fpr": 0.016
       },
-      "attack_suspicion_mean": 0.999944,
-      "benign_suspicion_mean": 0.642432
+      "attack_suspicion_mean": 0.944291,
+      "benign_suspicion_mean": 0.137113
     },
     "dual_encoder": {
-      "runtime_drift_threshold": 1.028901,
+      "runtime_drift_threshold": 0.871671,
       "applies_to_runtime_decision": true,
-      "suspicion_cutoff": 1.028901,
+      "suspicion_cutoff": 0.871671,
       "selection_method": "fpr_target",
       "flag_rule": "combined_score > runtime_drift_threshold",
-      "gmm_crossing_suspicion": 0.763221,
+      "gmm_crossing_suspicion": 0.682585,
       "eval": {
-        "tp": 50,
-        "fn": 150,
-        "fp": 0,
-        "tn": 65,
-        "recall": 0.25,
-        "fpr": 0.0
+        "tp": 372,
+        "fn": 128,
+        "fp": 8,
+        "tn": 492,
+        "recall": 0.744,
+        "fpr": 0.016
       },
-      "attack_suspicion_mean": 0.953456,
-      "benign_suspicion_mean": 0.772097
+      "attack_suspicion_mean": 0.927511,
+      "benign_suspicion_mean": 0.52005
     }
   },
-  "n_attack_samples": 200,
-  "n_benign_samples": 65,
+  "calibration_source": "v3_disjoint_calibration_set",
+  "n_attack_samples": 500,
+  "n_benign_samples": 500,
   "model": "data/zedd_finetuned_model",
   "baseline": "data/zedd_finetuned_baseline.json",
   "training_seed": 42,

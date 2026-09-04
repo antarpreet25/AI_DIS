@@ -1,0 +1,17 @@
+{
+  "train_seed": 90210,
+  "calib_seed": 70123,
+  "balanced_corpus_counts": {
+    "sensor_log": 230,
+    "dga_report": 230,
+    "maintenance_report": 115,
+    "maintenance_schedule": 115,
+    "technician_note": 115,
+    "inspection_report": 115,
+    "operator_handover": 230,
+    "supplier_communication": 230,
+    "scada_alert": 460
+  },
+  "docs_per_category": 460,
+  "min_uses_per_template": 4
+}

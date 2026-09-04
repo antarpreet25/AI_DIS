@@ -286,19 +286,31 @@ class RAGMemory:
 
         WHAT ACTUALLY GETS STORED
         -------------------------
-        Not the whole ``text``. Memory is stored at SEGMENT granularity so
-        ``check()`` can match the injected instruction rather than the
-        surrounding normal-looking document (see ``_split_segments``):
+        Not the whole ``text`` — only ``payload`` (the isolated injection
+        line, e.g. ``AttackSample.raw_attack`` in evaluation, or
+        ``ZEDDResult.worst_sentence`` from a live sentence/dual-encoder
+        catch — see main.py). If no payload is given, **nothing is
+        stored** (see below for why this is a no-op, not a fallback).
 
-          - If ``payload`` is given (the isolated injection line — e.g.
-            ``AttackSample.raw_attack``, or an operator-curated signature),
-            exactly that one string is stored.
-          - Otherwise ``text`` is split into sentence/line segments and
-            each is stored as its own row. This fallback is only for
-            callers that have no payload to hand (e.g. the live CLI); the
-            evaluation and pipeline paths always pass ``payload`` so the
-            store holds only real injection lines, never document
-            boilerplate.
+        WHY THERE IS NO "SPLIT THE WHOLE TEXT" FALLBACK
+        -------------------------------------------------
+        An earlier version fell back to sentence/line-splitting `text`
+        and storing every segment when no payload was supplied. That is
+        unsafe: the caller (main.py) blocks on a layer's OWN verdict —
+        filtering or ZEDD — which is a noisy classifier, not ground
+        truth. When that layer false-positives on a genuinely benign
+        document (ZEDD's calibrated FPR is not zero), the fallback would
+        store ordinary boilerplate lines ("Voltage: 33.8 kV") as "known
+        attack lines". Every other benign document sharing that report
+        template then matches those mislabeled lines at near-1.0
+        similarity, cascading into false positives across the rest of
+        the run — measured: 2 ZEDD false positives on benign poisoned
+        memory enough to cause 21/65 benign false positives from RAG in
+        one evaluation run. Skipping storage when there is no confirmed
+        payload trades a small amount of missed learning (a block with
+        no localised payload never enters memory) for eliminating that
+        poisoning path entirely — consistent with the module docstring's
+        existing "explicit, reviewed storage" security argument.
 
         Raises:
             ValueError: if attack_category is not one of ATTACK_CATEGORIES.
@@ -313,10 +325,13 @@ class RAGMemory:
 
         text = _safe_text(text)
         payload = _safe_text(payload).strip()
-        if payload:
-            segments = [payload]
-        else:
-            segments = _split_segments(text, self.rag_segment_min_chars) or [text]
+        if not payload:
+            self._log_store(
+                text="", attack_category=attack_category, source_layer=source_layer,
+                skipped_reason="no payload supplied — see store_attack docstring",
+            )
+            return
+        segments = [payload]
 
         base_metadata = _sanitize_metadata(metadata)
         base_metadata.update(
@@ -352,7 +367,7 @@ class RAGMemory:
         self.update_centroids(category=attack_category)
 
         self._log_store(
-            text=segments[0] if len(segments) == 1 else text,
+            text=payload,
             attack_category=attack_category,
             source_layer=source_layer,
         )
@@ -601,7 +616,10 @@ class RAGMemory:
         except Exception:
             pass  # logging must never crash detection
 
-    def _log_store(self, text: str, attack_category: str, source_layer: str) -> None:
+    def _log_store(
+        self, text: str, attack_category: str, source_layer: str,
+        skipped_reason: Optional[str] = None,
+    ) -> None:
         try:
             self.log_path.parent.mkdir(parents=True, exist_ok=True)
             entry = {
@@ -611,6 +629,8 @@ class RAGMemory:
                 "source_layer": source_layer,
                 "text_snippet": text[:100],
                 "text_length": len(text),
+                "skipped": skipped_reason is not None,
+                "skipped_reason": skipped_reason,
             }
             with open(self.log_path, "a") as f:
                 f.write(json.dumps(entry) + "\n")

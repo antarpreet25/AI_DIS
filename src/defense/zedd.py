@@ -303,6 +303,7 @@ class ZEDDDetector:
         stacked = np.stack([info["centroid"] for info in self.category_centroids.values()])
         self.global_centroid = _normalize_vector(stacked.mean(axis=0))
 
+        self._centroid_matrix_cache = None   # invalidate batched-scoring cache
         self._baseline_built = True
 
 
@@ -375,7 +376,18 @@ class ZEDDDetector:
         closest_category = max(category_sims, key=category_sims.get) if category_sims else None
         closest_sim = category_sims[closest_category] if closest_category is not None else 0.0
 
-        if self.pre_filter_enabled and closest_sim < self.pre_filter_threshold:
+        # The Stage-1 pre-filter is a fast-reject for inputs that are
+        # nothing like normal grid language. When a per-mode calibration
+        # is loaded (document_similarity_floor set), that calibrated floor
+        # is the sole authority for document mode — the fixed
+        # pre_filter_threshold must NOT independently flag, or it will
+        # catch legitimate documents whose closest-centroid similarity
+        # happens to sit below it (this was the v3 document-mode FPR bug).
+        if (
+            self.pre_filter_enabled
+            and self.document_similarity_floor is None
+            and closest_sim < self.pre_filter_threshold
+        ):
             return ZEDDResult(
                 flagged=True,
                 similarity_score=round(closest_sim, 4),
@@ -409,22 +421,43 @@ class ZEDDDetector:
             confidence=round(min(0.95, 0.5 + (category_threshold - closest_sim)), 2) if flagged else 0.0,
         )
 
+    def _centroid_matrix(self) -> np.ndarray:
+        """(n_categories, dim) matrix of L2-normalized category centroids,
+        cached. Lets sentence/dual-encoder modes score every sentence
+        against every centroid in one matmul instead of a Python loop of
+        per-sentence, per-category dot products."""
+        cached = getattr(self, "_centroid_matrix_cache", None)
+        n = len(self.category_centroids)
+        if cached is not None and cached.shape[0] == n:
+            return cached
+        if n == 0:
+            mat = np.zeros((0, 0), dtype=np.float64)
+        else:
+            mat = np.vstack([
+                _normalize_vector(np.asarray(info["centroid"], dtype=np.float64))
+                for info in self.category_centroids.values()
+            ])
+        self._centroid_matrix_cache = mat
+        return mat
+
     def _detect_sentence_level(self, text: str) -> ZEDDResult:
         sentences = self._split_sentences(text)
         if not sentences:
             result = self._detect_document_level(text)
             result.sentence_level_active = False
             return result
-        self._get_model()
-        worst_sim   = 1.0
-        worst_sent  = ""
-        for sentence in sentences:
-            vec = self._embed(sentence)
-            sims = [_cosine_similarity(vec, info["centroid"]) for info in self.category_centroids.values()]
-            sim = max(sims) if sims else 0.0
-            if sim < worst_sim:
-                worst_sim  = sim
-                worst_sent = sentence
+        # Batched: embed all sentences at once, score against all centroids
+        # in one matmul. Same decision as the old per-sentence loop
+        # (max over categories, then worst/min over sentences).
+        vecs = self._embed_many(sentences)                 # (n, dim), unit-norm rows
+        C = self._centroid_matrix()                        # (n_cat, dim)
+        if C.shape[0] == 0:
+            per_sentence_best = np.zeros(len(sentences))
+        else:
+            per_sentence_best = (vecs @ C.T).max(axis=1)   # (n,)
+        worst_idx = int(np.argmin(per_sentence_best))
+        worst_sim = float(per_sentence_best[worst_idx])
+        worst_sent = sentences[worst_idx]
         flagged = worst_sim < self.drift_threshold
         return ZEDDResult(
             flagged=flagged,
@@ -451,27 +484,34 @@ class ZEDDDetector:
             result.dual_encoder_active = False
             return result
         self._get_model()
-        worst_combined = -1.0
-        worst_sentence = ""
-        worst_domain   = 0.0
-        worst_security = 0.0
-        for sentence in sentences:
-            domain_emb = self._embed(sentence)
-            best_domain_sim = max(
-                _cosine_similarity(domain_emb, info["centroid"])
-                for info in self.category_centroids.values()
-            )
-            domain_drift = 1.0 - best_domain_sim
-            sec_emb = self._security_model.encode(
-                sentence, convert_to_numpy=True, normalize_embeddings=True
-            )
-            security_prox = max(0.0, float(np.dot(sec_emb, self._security_centroid)))
-            combined = self.domain_weight * domain_drift + self.security_weight * security_prox
-            if combined > worst_combined:
-                worst_combined = combined
-                worst_sentence = sentence
-                worst_domain   = domain_drift
-                worst_security = security_prox
+        # Batched: one MiniLM encode call for all sentences, one SecureBERT
+        # encode call for all sentences (SecureBERT per-sentence in a
+        # Python loop was the dominant CPU cost). Same decision as before:
+        # combined = w_d*domain_drift + w_s*security_prox per sentence,
+        # then worst = max over sentences.
+        domain_embs = self._embed_many(sentences)                     # (n, dim)
+        C = self._centroid_matrix()                                   # (n_cat, dim)
+        if C.shape[0] == 0:
+            best_domain = np.zeros(len(sentences))
+        else:
+            best_domain = (domain_embs @ C.T).max(axis=1)             # (n,)
+        domain_drift_all = 1.0 - best_domain                          # (n,)
+
+        sec_embs = self._security_model.encode(
+            sentences, convert_to_numpy=True, normalize_embeddings=True,
+            batch_size=64,
+        )                                                            # (n, sdim)
+        security_prox_all = np.clip(sec_embs @ self._security_centroid, 0.0, None)  # (n,)
+
+        combined_all = (
+            self.domain_weight * domain_drift_all
+            + self.security_weight * security_prox_all
+        )
+        widx = int(np.argmax(combined_all))
+        worst_combined = float(combined_all[widx])
+        worst_sentence = sentences[widx]
+        worst_domain   = float(domain_drift_all[widx])
+        worst_security = float(security_prox_all[widx])
         flagged = worst_combined > self.drift_threshold
         return ZEDDResult(
             flagged=flagged,
@@ -594,6 +634,7 @@ class ZEDDDetector:
         )
         self.drift_threshold = payload.get("drift_threshold", self.drift_threshold)
         self.pre_filter_threshold = payload.get("pre_filter_threshold", self.pre_filter_threshold)
+        self._centroid_matrix_cache = None   # invalidate batched-scoring cache
         self._baseline_built = True
 
 
@@ -730,12 +771,16 @@ class ZEDDDetector:
                     active_mode = "document"
                 modes = cal.get("modes") or {}
                 if active_mode in modes and "runtime_drift_threshold" in modes[active_mode]:
-                    detector.drift_threshold = float(
-                        modes[active_mode]["runtime_drift_threshold"]
-                    )
+                    rt = float(modes[active_mode]["runtime_drift_threshold"])
+                    detector.drift_threshold = rt
+                    if active_mode == "document":
+                        # document mode compares a SIMILARITY against this
+                        # floor inside _detect_document_level (not
+                        # drift_threshold, which that path ignores).
+                        detector.document_similarity_floor = rt
                     print(
-                        f"[load_finetuned] per-mode drift_threshold "
-                        f"({active_mode}): {detector.drift_threshold:.4f}"
+                        f"[load_finetuned] per-mode threshold "
+                        f"({active_mode}): {rt:.4f}"
                     )
                 else:
                     detector.drift_threshold = float(cal["threshold"])
@@ -1029,4 +1074,97 @@ def build_enriched_baseline(
     total = len(all_texts)
     print(f"[build_enriched_baseline] Baseline built from {total} total texts "
           f"across {len(category_texts)} categories.")
+    return detector
+
+
+def build_document_register_baseline(
+    model=None,
+    model_name: str = DEFAULT_MODEL_NAME,
+    pre_filter_enabled: bool = True,
+    drift_threshold: float = 0.30,
+    pre_filter_threshold: float = 0.25,
+    category_thresholds: Optional[dict] = None,
+    corpus_seed: Optional[int] = None,
+    corpus_counts: Optional[dict] = None,
+) -> "ZEDDDetector":
+    """
+    Build a ZEDDDetector baseline from TEMPLATED POWER-GRID DOCUMENTS
+    (SCADA alerts, DGA reports, maintenance reports/schedules, technician
+    notes, inspection reports, operator handovers, supplier
+    communications, sensor logs) rather than from sensor_generator.py's
+    raw telemetry readings.
+
+    WHY build_enriched_baseline() ABOVE IS NOT ENOUGH FOR SENTENCE-LEVEL
+    DETECTION
+    ----------------------------------------------------------------------
+    build_enriched_baseline() sources ALL FOUR content categories from
+    sensor telemetry text (_reading_to_text() output) — including the
+    categories named "maintenance_reports", "operator_notes" and
+    "system_alerts". So every category centroid is, in practice, a
+    telemetry centroid, regardless of its name. A legitimate SCADA-alert
+    header line or operator-handover sentence never resembles telemetry
+    phrasing, so ZEDD's sentence mode (Layer 3, sentence_level=True)
+    scores ordinary document fragments as maximally abnormal — measured
+    empirically, benign documents' worst-sentence similarity averaged
+    -0.06 against that baseline (i.e. anti-correlated with every
+    category), which is why sentence mode's false-positive rate was
+    effectively 100%.
+
+    This function instead builds the baseline from zedd_corpus.py's
+    templated document generator (the SAME DocumentFactory /
+    AttackTemplateLibrary / AttackInserter machinery used to build the
+    evaluation dataset, but with a seed disjoint from it — see
+    zedd_corpus.py's module docstring), covering every document register
+    that actually appears in this project's documents, mapped to ZEDD's
+    four content categories via zedd_corpus.DOC_TYPE_TO_CATEGORY. Each
+    category's text pool mixes WHOLE documents (keeps document-mode
+    centroids representative of full documents) with their LINE-level
+    segments (gives sentence-mode centroids real coverage of legitimate
+    fragments) — see build_register_baseline_texts().
+
+    This closes the coverage half of sentence mode's false-positive
+    problem. It does NOT by itself solve the harder half — that some
+    injections in this dataset are deliberately worded to read like
+    plausible operator/lab annotations, which requires contrastive
+    fine-tuning at sentence granularity (zedd_corpus.generate_sentence_pairs
+    + ZEDDTrainer) to address; see that module's docstring.
+    """
+    try:
+        import zedd_corpus
+    except ImportError:
+        # Defensive: only needed if this module is imported before `src/`
+        # is on sys.path (e.g. run standalone rather than via main.py /
+        # zedd_trainer.py, both of which already ensure it is).
+        import sys as _sys
+        _sys.path.insert(0, str(_PROJECT_ROOT / "src"))
+        import zedd_corpus
+
+    corpus = zedd_corpus.generate_disjoint_corpus(
+        seed=corpus_seed if corpus_seed is not None else zedd_corpus._CORPUS_SEED,
+        counts=corpus_counts,
+    )
+    category_texts = zedd_corpus.build_register_baseline_texts(corpus)
+    for category, texts in category_texts.items():
+        print(f"[build_document_register_baseline] {category}: {len(texts)} texts "
+              f"(documents + line segments).")
+
+    detector = ZEDDDetector(
+        drift_threshold=drift_threshold,
+        pre_filter_threshold=pre_filter_threshold,
+        pre_filter_enabled=pre_filter_enabled,
+        model_name=model_name,
+        model=model,
+    )
+
+    all_texts = []
+    all_categories = []
+    for category, texts in category_texts.items():
+        all_texts.extend(texts)
+        all_categories.extend([category] * len(texts))
+
+    detector.build_baseline(all_texts, all_categories, category_thresholds=category_thresholds)
+
+    print(f"[build_document_register_baseline] Baseline built from "
+          f"{len(all_texts)} total texts ({len(corpus)} documents) across "
+          f"{len(category_texts)} categories.")
     return detector
