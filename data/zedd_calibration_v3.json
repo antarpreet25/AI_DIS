@@ -38,22 +38,22 @@
       "benign_suspicion_mean": 0.137113
     },
     "dual_encoder": {
-      "runtime_drift_threshold": 0.871671,
+      "runtime_drift_threshold": 0.847537,
       "applies_to_runtime_decision": true,
-      "suspicion_cutoff": 0.871671,
+      "suspicion_cutoff": 0.847537,
       "selection_method": "fpr_target",
       "flag_rule": "combined_score > runtime_drift_threshold",
-      "gmm_crossing_suspicion": 0.682585,
+      "gmm_crossing_suspicion": 0.556452,
       "eval": {
-        "tp": 372,
-        "fn": 128,
+        "tp": 375,
+        "fn": 125,
         "fp": 8,
         "tn": 492,
-        "recall": 0.744,
+        "recall": 0.75,
         "fpr": 0.016
       },
-      "attack_suspicion_mean": 0.927511,
-      "benign_suspicion_mean": 0.52005
+      "attack_suspicion_mean": 0.937554,
+      "benign_suspicion_mean": 0.289956
     }
   },
   "calibration_source": "v3_disjoint_calibration_set",

@@ -78,6 +78,33 @@ _UNCLASSIFIED_ATTACK_FALLBACK_CATEGORY = "indirect_injection"
 logger = logging.getLogger(__name__)
 
 
+# ============================================================
+# TESTING BLOCK — stub the agent so evaluation runs make ZERO
+# Anthropic API calls. This REDEFINES analyze_readings with the
+# same name, so every call site (Pipeline.run(), the CLI) uses
+# this instead automatically — no other file needs to change.
+#
+# To go back to real API calls: comment out (or delete) this
+# whole block. The import above will take over again unchanged.
+# ============================================================
+_stub_agent_call_count = 0
+
+def analyze_readings(rolling_window, user_context=None, client=None):
+    global _stub_agent_call_count
+    _stub_agent_call_count += 1
+    return GridAssessment(
+        analysis="[TESTING BLOCK] Stubbed — no API call made.",
+        risk_level="LOW",
+        recommendation="Continue routine monitoring. No action required.",
+        confidence_pct=90,
+        tool_call=None,
+    )
+# ============================================================
+# END TESTING BLOCK
+# ============================================================
+
+
+
 @dataclass
 class PipelineResult:
     blocked: bool
@@ -280,17 +307,24 @@ class Pipeline:
         # --- Layer 3: ZEDD, on the ORIGINAL input, not the token-wrapped version ---
         zedd_result = self.zedd.detect(input_text)
         if zedd_result.flagged:
-            # Prefer ground-truth payload (evaluation) when available; in
-            # live use (no ground truth) fall back to the specific
-            # sentence ZEDD itself localised as the reason for flagging
-            # (sentence/dual-encoder modes only — document mode has no
-            # such localisation). RAGMemory.store_attack() stores nothing
-            # at all if this is still None — see its docstring for why a
-            # whole-document fallback there was unsafe.
-            zedd_payload = attack_payload or getattr(zedd_result, "worst_sentence", None)
+            # Ground-truth payload only (evaluation's AttackSample.raw_attack).
+            # An earlier version fell back to ZEDD's own zedd_result.worst_sentence
+            # when there was no ground truth, reasoning that a localised single
+            # sentence was much safer than storing the whole document. Measured,
+            # that was STILL unsafe: the "worst sentence" ZEDD picks on a false
+            # positive is very often exactly the kind of fragmentary telemetry
+            # line ("Voltage: 33.8 kV") that recurs across many other benign
+            # documents — i.e. ZEDD's own false-positive mechanism and RAG's
+            # poisoning mechanism select the same kind of line. Confirmed: with
+            # that fallback, benign FPR from RAG dropped from 21/65 to ~8/65 but
+            # never reached zero. With no fallback at all, RAG never stores
+            # anything from an unconfirmed ZEDD flag — it only ever learns from
+            # blocks that carry independently-known ground truth. RAGMemory.
+            # store_attack() stores nothing when payload is None — see its
+            # docstring.
             self._store_blocked_attack(
                 input_text, filter_reason=None,
-                source_layer="zedd", payload=zedd_payload,
+                source_layer="zedd", payload=attack_payload,
             )
             return self._finish(
                 start, blocked=True, blocked_by="zedd",

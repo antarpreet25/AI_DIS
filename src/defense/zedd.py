@@ -172,8 +172,17 @@ class ZEDDDetector:
         dual_encoder: bool = False,
         security_model_name: str = "ehsanaghaei/SecureBERT",
         security_model=None,
-        domain_weight: float = 0.5,
-        security_weight: float = 0.5,
+        # 0.8/0.2, not the naive 0.5/0.5 split: a grid sweep on the
+        # disjoint calibration set (domain_weight 0.0-1.0 in steps of 0.1)
+        # found security_proximity alone catches only 7% of attacks
+        # (SecureBERT's signal barely varies between benign and attack
+        # text on this domain — see zedd_corpus/session notes), and
+        # recall at FPR<=0.02 is FLAT from domain_weight=0.8 to 1.0
+        # (0.752 either way) while 0.5/0.5 measured slightly worse
+        # (0.744). 0.8/0.2 keeps a small non-zero security term rather
+        # than deleting the mechanism outright, at zero measured cost.
+        domain_weight: float = 0.8,
+        security_weight: float = 0.2,
         sentence_level: bool = False,
         sentence_min_chars: int = 35,
         log_path: Optional[Path] = None,
