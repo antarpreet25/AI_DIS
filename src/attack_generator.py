@@ -101,6 +101,13 @@ class AttackSample:
     ground_truth_risk: str = "HIGH"      # LOW / MEDIUM / HIGH / CRITICAL
     image_path: Optional[str] = None    # set only for multimodal samples; None for all text-only samples
     doc_type: str = "unknown"
+    # Provenance fields for the scaled-v2 generator (dataset_scale_v2.py).
+    # Defaulted so every pre-existing sample/caller is unaffected.
+    template_kind: str = "fixed"        # "fixed" (authored raw_phrase) or "compositional" (slot-filled pattern)
+    slot_values: dict = field(default_factory=dict)   # populated only for template_kind="compositional"
+    nearest_neighbor_similarity: float = 0.0  # max cosine sim to any other same-category sample at generation time
+    generation_seed: int = 0
+    dataset_version: str = "v1"
 
     def to_dict(self) -> dict:
         return asdict(self)
