@@ -443,18 +443,25 @@ if __name__ == "__main__":
     from attack_generator import AttackGenerator
     from sensor_generator import build_scenarios, generate_readings
 
-    # Parse --mode argument
+    # Parse --mode and --dataset arguments
     mode = "document"
+    dataset_version = "v2"   # v2 = the hybrid (real + synthetic) scaled-up set; v1 = the
+                              # original 265-sample set, kept available for regression checks
     for arg in sys.argv[1:]:
         if arg.startswith("--mode="):
             mode = arg.split("=")[1]
-    
+        elif arg.startswith("--dataset="):
+            dataset_version = arg.split("=")[1]
+
     if mode not in ("document", "sentence", "dual_encoder"):
         print(f"Unknown mode: {mode}. Use document, sentence, or dual_encoder.")
         sys.exit(1)
+    if dataset_version not in ("v1", "v2"):
+        print(f"Unknown dataset: {dataset_version}. Use v1 (original 265) or v2 (hybrid scaled).")
+        sys.exit(1)
 
     print(f"\n{'='*60}")
-    print(f"EVALUATION MODE: {mode}")
+    print(f"EVALUATION MODE: {mode}  |  DATASET: {dataset_version}")
     print(f"{'='*60}\n")
 
     # Clean state before initializing the pipeline
@@ -466,10 +473,14 @@ if __name__ == "__main__":
         _zedd_base.unlink(missing_ok=True)
 
     gen = AttackGenerator()
+    v2_path = _PROJECT_ROOT / "data" / "attacks" / "attack_dataset_scaled_v2.json"
     scaled_path = _PROJECT_ROOT / "data" / "attacks" / "attack_dataset_scaled.json"
     original_path = _PROJECT_ROOT / "data" / "attacks" / "attack_dataset.json"
 
-    if scaled_path.exists():
+    if dataset_version == "v2" and v2_path.exists():
+        dataset = gen.load(str(v2_path))
+        print(f"Loaded hybrid scaled-v2 dataset: {len(dataset)} samples")
+    elif scaled_path.exists():
         dataset = gen.load(str(scaled_path))
         print(f"Loaded scaled dataset: {len(dataset)} samples")
     else:
@@ -483,8 +494,9 @@ if __name__ == "__main__":
     evaluator = Evaluator(pipeline=pipeline, fresh_run=False)
     report    = evaluator.run(dataset, readings)
 
-    # Save to mode-specific file
-    out_path = _PROJECT_ROOT / "data" / "results" / f"evaluation_report_{mode}.json"
+    # Save to mode- and dataset-specific file so v1/v2 runs never overwrite each other
+    suffix = "" if dataset_version == "v1" else f"_{dataset_version}"
+    out_path = _PROJECT_ROOT / "data" / "results" / f"evaluation_report_{mode}{suffix}.json"
     report.save(str(out_path))
     report.print_summary()
     print(f"\nResults saved to {out_path}")

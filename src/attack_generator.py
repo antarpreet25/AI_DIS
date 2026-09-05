@@ -103,8 +103,9 @@ class AttackSample:
     doc_type: str = "unknown"
     # Provenance fields for the scaled-v2 generator (dataset_scale_v2.py).
     # Defaulted so every pre-existing sample/caller is unaffected.
-    template_kind: str = "fixed"        # "fixed" (authored raw_phrase) or "compositional" (slot-filled pattern)
+    template_kind: str = "fixed"        # "fixed" (authored raw_phrase) or "compositional" (slot-filled pattern) or "real"
     slot_values: dict = field(default_factory=dict)   # populated only for template_kind="compositional"
+    payload_source: str = "synthetic"   # "synthetic" | "real_deepset" | "real_jayavibhav" | ...
     nearest_neighbor_similarity: float = 0.0  # max cosine sim to any other same-category sample at generation time
     generation_seed: int = 0
     dataset_version: str = "v1"

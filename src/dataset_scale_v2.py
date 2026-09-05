@@ -37,6 +37,7 @@ import random
 import sys
 import time
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
 
@@ -47,6 +48,7 @@ from attack_content import AttackTemplateLibrary
 from attack_content_v2 import ExtendedDocumentFactory, CompositionalAttackFactory, ALL_DOC_TYPES_V2
 from attack_pipeline import AttackInserter
 from attack_generator import AttackSample
+from real_attack_loader import load_all_real_templates
 
 DEFAULT_SEED = 90            # disjoint from the eval seed (42) and from ZEDD's own
                               # training/calibration seeds (90210 / 70123) — v2 is a
@@ -104,8 +106,15 @@ def _greedy_dedup_select(candidates: list, embeddings: np.ndarray, threshold: fl
 
 def build_attack_category(
     category: str, target: int, seed: int, sim_threshold: float, embedder,
+    real_templates: Optional[list] = None,
 ) -> list:
-    """Returns a list of dicts (AttackSample-shaped) for one category."""
+    """Returns a list of dicts (AttackSample-shaped) for one category.
+
+    real_templates: optional [(AttackTemplate, payload_source), ...] from
+    real_attack_loader.py — mixed into the pool alongside the fixed and
+    compositional (synthetic) templates, tagged with their real source so
+    the final dataset can be sliced by provenance (see AttackSample.
+    payload_source)."""
     rng = random.Random(seed)
     inserter = AttackInserter(rng=rng)
     factory = ExtendedDocumentFactory(rng=rng)
@@ -123,7 +132,10 @@ def build_attack_category(
     doc_types = list(ALL_DOC_TYPES_V2)
     round_no = 0
     draw_i = 0
-    fixed_pool = [(t, "fixed", {}) for t in fixed_templates]
+    # (template, kind, slot_values, payload_source)
+    fixed_pool = [(t, "fixed", {}, "synthetic") for t in fixed_templates]
+    real_pool = [(t, "real", {}, src) for t, src in (real_templates or [])]
+    rng.shuffle(real_pool)  # real examples interleave rather than cluster together
 
     while len(accepted) < target and round_no < MAX_ROUNDS:
         round_no += 1
@@ -134,7 +146,11 @@ def build_attack_category(
         # every phrase it has ever emitted, so these are new combinations,
         # not repeats of round 1's).
         fresh_comp = comp_factory.generate(category, n_draw)
-        round_pool = fixed_pool + [(t, "compositional", sv) for t, sv in fresh_comp]
+        round_pool = (
+            fixed_pool
+            + real_pool
+            + [(t, "compositional", sv, "synthetic") for t, sv in fresh_comp]
+        )
         if not round_pool:
             break
 
@@ -142,14 +158,14 @@ def build_attack_category(
         batch_wrapped = []
         batch_payload = []
         for _ in range(n_draw):
-            template, kind, slot_values = round_pool[draw_i % len(round_pool)]
+            template, kind, slot_values, source = round_pool[draw_i % len(round_pool)]
             draw_i += 1
             doc_type = doc_types[draw_i % len(doc_types)]
             doc = getattr(factory, f"generate_{doc_type}")()
             wrapped, clean = inserter.insert(doc, template)
             batch_meta.append({
                 "template": template, "kind": kind, "slot_values": slot_values,
-                "doc_type": doc_type, "clean": clean,
+                "doc_type": doc_type, "clean": clean, "source": source,
             })
             batch_wrapped.append(wrapped)
             batch_payload.append(template.get_injection_text())
@@ -187,6 +203,7 @@ def build_attack_category(
                 "doc_type": m["doc_type"],
                 "template_kind": m["kind"],
                 "slot_values": m["slot_values"],
+                "payload_source": m["source"],
                 "nearest_neighbor_similarity": round(max_sims[j], 4),
                 "generation_seed": seed,
                 "dataset_version": "v2",
@@ -242,6 +259,7 @@ def build_benign(target: int, seed: int, sim_threshold: float, embedder) -> list
                 "doc_type": doc_type,
                 "template_kind": "fixed",
                 "slot_values": {},
+                "payload_source": "synthetic",
                 "nearest_neighbor_similarity": round(max_sims[j], 4),
                 "generation_seed": seed,
                 "dataset_version": "v2",
@@ -261,6 +279,9 @@ def main():
     ap.add_argument("--seed", type=int, default=DEFAULT_SEED)
     ap.add_argument("--sim-threshold", type=float, default=DEFAULT_SIM_THRESHOLD)
     ap.add_argument("--out", type=str, default=str(_ROOT / "data" / "attacks" / "attack_dataset_scaled_v2.json"))
+    ap.add_argument("--no-real", action="store_true",
+                     help="skip real_attack_loader — synthetic-only, for comparison/debugging")
+    ap.add_argument("--max-jayavibhav", type=int, default=5000)
     args = ap.parse_args()
 
     print(f"[dataset_scale_v2] target: {args.attacks_per_category}/category x {len(CATEGORIES)} "
@@ -269,12 +290,18 @@ def main():
           "detector — dedup must be independent of any one detector's embedding space)...")
     embedder = _get_embedder()
 
+    real_by_category = {}
+    if not args.no_real:
+        print("\n[dataset_scale_v2] loading real attack templates (deepset + jayavibhav)...")
+        real_by_category = load_all_real_templates(max_jayavibhav=args.max_jayavibhav)
+
     t0 = time.time()
     all_samples = []
     for i, cat in enumerate(CATEGORIES):
         print(f"\n[dataset_scale_v2] building {cat}...")
         all_samples += build_attack_category(
             cat, args.attacks_per_category, args.seed + i * 7919, args.sim_threshold, embedder,
+            real_templates=real_by_category.get(cat),
         )
 
     print(f"\n[dataset_scale_v2] building benign...")
@@ -310,10 +337,16 @@ def main():
     by_cat = collections.Counter(s["category"] for s in all_samples)
     by_doc = collections.Counter(s["doc_type"] for s in all_samples)
     by_kind = collections.Counter(s["template_kind"] for s in all_samples if s["category"] != "benign")
+    by_source = collections.Counter(s["payload_source"] for s in all_samples if s["category"] != "benign")
+    by_source_cat = collections.Counter(
+        (s["category"], s["payload_source"]) for s in all_samples if s["category"] != "benign"
+    )
     nn_sims = [s["nearest_neighbor_similarity"] for s in all_samples]
     print("category counts:", dict(by_cat))
     print("doc_type counts:", dict(by_doc))
     print("template_kind counts (attacks only):", dict(by_kind))
+    print("payload_source counts (attacks only):", dict(by_source))
+    print("payload_source by category:", dict(by_source_cat))
     print(f"nearest-neighbour similarity: mean={np.mean(nn_sims):.3f} max={np.max(nn_sims):.3f} "
           f"(threshold was {args.sim_threshold})")
 
