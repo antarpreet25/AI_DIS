@@ -1,0 +1,11 @@
+# Streamlit theme for the Substation Defence Console (src/dashboard.py)
+[theme]
+base = "dark"
+primaryColor = "#f5a623"
+backgroundColor = "#0b1017"
+secondaryBackgroundColor = "#141d29"
+textColor = "#e8eef6"
+font = "monospace"
+
+[server]
+runOnSave = true
