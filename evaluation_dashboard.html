@@ -72,6 +72,13 @@
   }
 
   * { box-sizing: border-box; }
+  /* Must be !important: several elements below (e.g. .approval, .verdict)
+     set their own `display` for when they ARE shown, which — at equal CSS
+     specificity — beats the browser's built-in `[hidden]{display:none}`
+     rule once this file is served standalone (no host-injected reset).
+     Without this line the tool-call approval card stays visible on every
+     scenario instead of only the one that raises it. */
+  [hidden] { display: none !important; }
   body {
     margin: 0; background: var(--bg); color: var(--ink);
     font-family: var(--f-body); font-size: 13.5px; line-height: 1.5;

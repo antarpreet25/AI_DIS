@@ -8,4 +8,9 @@ textColor = "#e8eef6"
 font = "monospace"
 
 [server]
-runOnSave = true
+# Watcher disabled: Streamlit's LocalSourcesWatcher walks every imported
+# module's __path__, and transformers' lazy-loaded zoedepth submodule raises
+# ModuleNotFoundError for torchvision (not a project dependency, not used
+# anywhere here) when touched. Cosmetic-only - it never crashed the app -
+# but it floods the terminal, so the watcher (and runOnSave with it) is off.
+fileWatcherType = "none"

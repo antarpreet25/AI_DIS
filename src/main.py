@@ -536,6 +536,18 @@ def _cli():
     parser.add_argument("--duration-min", type=float, default=60.0, help="Simulated sensor scenario duration.")
     parser.add_argument("--n-window", type=int, default=10, help="Rolling window size passed to the agent.")
     parser.add_argument("--seed", type=int, default=42, help="Sensor generation seed, for reproducibility.")
+    parser.add_argument(
+        "--zedd-mode", choices=Pipeline._VALID_ZEDD_MODES, default="document",
+        help=(
+            "ZEDD detection mode. Default 'document' matches this CLI's original, "
+            "unchanged behaviour. 'document' mode's calibration is degenerate "
+            "(see data/zedd_calibration.json: applies_to_runtime_decision=False for "
+            "document) and only catches whole-document-level drift, which a single "
+            "injected sentence rarely produces. 'sentence' mode is what production "
+            "code (dashboard.py, detection_layer_footprint.py, the evaluation suite) "
+            "actually runs, with a real calibrated threshold."
+        ),
+    )
     args = parser.parse_args()
 
     scenario = scenarios[args.scenario]
@@ -543,7 +555,7 @@ def _cli():
         scenario, duration_min=args.duration_min, interval_min=5.0, seed=args.seed
     )
 
-    pipeline = Pipeline()
+    pipeline = Pipeline(zedd_mode=args.zedd_mode)
     result = pipeline.run(args.attack, sensor_readings, n_window=args.n_window)
 
     print(json.dumps(asdict(result), indent=2, default=str))
